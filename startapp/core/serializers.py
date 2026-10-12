@@ -91,6 +91,8 @@ class BookingSerializer(serializers.ModelSerializer):
             if listing is None:
                 raise serializers.ValidationError({"listing": "Bu e'lon hozir faol emas."})
             model = Booking if payment_method == Booking.PaymentMethod.CASH else BookingOrder
+            if model is BookingOrder:
+                validated_data["status"] = BookingOrder.Status.AWAITING_PAYMENT
             booking = model(user=self.context["request"].user, listing=listing, **validated_data)
             try:
                 booking.full_clean()

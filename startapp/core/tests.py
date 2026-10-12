@@ -100,18 +100,30 @@ class BookingTests(StartAppBaseTest):
         self.assertEqual(booking.payment_method, Booking.PaymentMethod.CASH)
         self.assertEqual(BookingOrder.objects.count(), 0)
 
-    def test_online_booking_waits_for_admin_acceptance_and_payment(self):
+    @override_settings(
+        CLICK_SERVICE_ID="service-test",
+        CLICK_MERCHANT_ID="merchant-test",
+        CLICK_SECRET_KEY="secret-test",
+        CLICK_CHECKOUT_BASE_URL="https://my.click.uz/services/pay",
+    )
+    def test_online_booking_starts_payment_automatically_without_admin(self):
         self.client.force_login(self.user)
         response = self.client.post(reverse("create-booking", args=[self.home.slug]), {
             "check_in": self.tomorrow.isoformat(), "check_out": self.day_after.isoformat(),
             "guests": 2, "payment_method": "click",
         })
-        self.assertRedirects(response, reverse("my-bookings"))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse(
+            "pay-booking-order",
+            args=[BookingOrder.objects.get().pk],
+        ))
+        response = self.client.get(response.url)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("service_id=service-test", response.url)
         order = BookingOrder.objects.get(user=self.user, listing=self.home)
-        self.assertEqual(order.status, BookingOrder.Status.PENDING)
+        self.assertEqual(order.status, BookingOrder.Status.AWAITING_PAYMENT)
         self.assertEqual(order.total_price, Decimal("500000"))
         self.assertEqual(Booking.objects.count(), 0)
-        self.assertContains(self.client.get(reverse("my-bookings")), "Qabul qilinishi kutilmoqda")
         response = self.client.get(reverse("home"), {
             "kind": "home",
             "check_in": self.tomorrow.isoformat(),
@@ -119,7 +131,7 @@ class BookingTests(StartAppBaseTest):
         })
         self.assertNotContains(response, "Test apartment")
 
-    def test_admin_accepts_online_order_before_payment_is_available(self):
+    def test_admin_cannot_approve_or_reject_online_orders(self):
         order = BookingOrder.objects.create(
             user=self.user, listing=self.home, check_in=self.tomorrow,
             check_out=self.day_after, guests=2, payment_method=Booking.PaymentMethod.PAYME,
@@ -128,23 +140,22 @@ class BookingTests(StartAppBaseTest):
             username="site-admin", email="admin@example.com", password="admin-test-password-123",
         )
         self.client.force_login(admin_user)
-        response = self.client.post(reverse("admin:core_bookingorder_changelist"), {
-            "action": "accept_orders",
-            "_selected_action": [str(order.pk)],
-        })
-        self.assertEqual(response.status_code, 302)
+        response = self.client.get(reverse("admin:core_bookingorder_changelist"))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "accept_orders")
         order.refresh_from_db()
         self.assertEqual(order.status, BookingOrder.Status.AWAITING_PAYMENT)
         self.assertEqual(Booking.objects.count(), 0)
 
-    def test_online_payment_redirect_requires_admin_acceptance(self):
+    def test_new_online_orders_are_ready_for_payment_without_admin(self):
         order = BookingOrder.objects.create(
             user=self.user, listing=self.home, check_in=self.tomorrow,
             check_out=self.day_after, guests=2, payment_method=Booking.PaymentMethod.CLICK,
         )
         self.client.force_login(self.user)
-        response = self.client.get(reverse("pay-booking-order", args=[order.pk]))
-        self.assertRedirects(response, reverse("my-bookings"))
+        response = self.client.get(reverse("my-bookings"))
+        self.assertEqual(order.status, BookingOrder.Status.AWAITING_PAYMENT)
+        self.assertContains(response, "To'lash")
         self.assertEqual(Booking.objects.count(), 0)
 
     @override_settings(
@@ -153,7 +164,7 @@ class BookingTests(StartAppBaseTest):
         CLICK_SECRET_KEY="secret-test",
         CLICK_CHECKOUT_BASE_URL="https://my.click.uz/services/pay",
     )
-    def test_accepted_online_order_redirects_to_click_without_creating_booking(self):
+    def test_online_order_redirects_to_click_without_creating_booking(self):
         order = BookingOrder.objects.create(
             user=self.user, listing=self.home, check_in=self.tomorrow,
             check_out=self.day_after, guests=2, payment_method=Booking.PaymentMethod.CARD,
@@ -318,7 +329,7 @@ class ApiTests(StartAppBaseTest):
         }, format="json")
         self.assertEqual(response.status_code, 403)
 
-    def test_authenticated_online_booking_api_creates_pending_order(self):
+    def test_authenticated_online_booking_api_creates_payment_ready_order(self):
         self.api.force_authenticate(user=self.user)
         response = self.api.post(reverse("api-bookings"), {
             "listing": self.home.pk, "check_in": self.tomorrow.isoformat(),
@@ -328,7 +339,7 @@ class ApiTests(StartAppBaseTest):
         self.assertEqual(Decimal(response.data["total_price"]), Decimal("500000.00"))
         self.assertEqual(response.data["payment_method"], "click")
         self.assertEqual(Booking.objects.count(), 0)
-        self.assertEqual(BookingOrder.objects.get().status, BookingOrder.Status.PENDING)
+        self.assertEqual(BookingOrder.objects.get().status, BookingOrder.Status.AWAITING_PAYMENT)
 
     def test_bookings_api_serializes_online_order_statuses(self):
         order = BookingOrder.objects.create(

@@ -1,7 +1,4 @@
 from django.contrib import admin
-from django.contrib import messages
-from django.core.exceptions import ValidationError
-from django.utils import timezone
 
 from .models import Booking, BookingOrder, PaymentTransaction, RentalListing, home, car
 
@@ -36,46 +33,6 @@ class BookingOrderAdmin(admin.ModelAdmin):
     list_filter = ("status", "payment_method", "listing__kind", "created_at")
     search_fields = ("reference", "listing__title", "user__username", "user__email")
     readonly_fields = tuple(field.name for field in BookingOrder._meta.fields)
-    actions = ("accept_orders", "reject_orders", "cancel_unpaid_orders")
-
-    @admin.action(description="Tanlangan buyurtmalarni qabul qilish va to'lovga chiqarish")
-    def accept_orders(self, request, queryset):
-        accepted = 0
-        for order in queryset.filter(status=BookingOrder.Status.PENDING).select_related("listing"):
-            try:
-                order.full_clean()
-            except ValidationError:
-                self.message_user(
-                    request,
-                    f"{order.reference} buyurtmasini qabul qilib bo'lmadi: sanalar band yoki buyurtma yaroqsiz.",
-                    level=messages.ERROR,
-                )
-                continue
-            order.status = BookingOrder.Status.AWAITING_PAYMENT
-            order.accepted_at = timezone.now()
-            order.save(update_fields=["status", "accepted_at"])
-            accepted += 1
-        if accepted:
-            self.message_user(request, f"{accepted} ta buyurtma qabul qilindi; mijozga to'lov ochildi.")
-
-    @admin.action(description="Tanlangan buyurtmalarni rad etish")
-    def reject_orders(self, request, queryset):
-        rejected = queryset.filter(status=BookingOrder.Status.PENDING).update(status=BookingOrder.Status.REJECTED)
-        self.message_user(request, f"{rejected} ta buyurtma rad etildi.")
-
-    @admin.action(description="To'lov boshlanmagan buyurtmalarni bekor qilish")
-    def cancel_unpaid_orders(self, request, queryset):
-        cancelled = 0
-        for order in queryset.filter(status__in=[
-            BookingOrder.Status.PENDING,
-            BookingOrder.Status.AWAITING_PAYMENT,
-        ]):
-            if order.payments.filter(state=1).exists():
-                continue
-            order.status = BookingOrder.Status.CANCELLED
-            order.save(update_fields=["status"])
-            cancelled += 1
-        self.message_user(request, f"{cancelled} ta buyurtma bekor qilindi.")
 
 
 @admin.register(PaymentTransaction)

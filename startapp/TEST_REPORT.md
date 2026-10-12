@@ -16,7 +16,7 @@
 
 ## Django runtime tests
 
-`python manage.py test core`: **PASS** (25 tests). Coverage includes guest/access behavior, cash booking creation, pending online orders, admin approval, reservation conflicts, Click callbacks, Payme Merchant API callbacks, and the booking/API flows.
+`python manage.py test core`: **PASS** (25 tests). Coverage includes guest/access behavior, cash booking creation, automatic online checkout without admin approval, reservation conflicts, Click callbacks, Payme Merchant API callbacks, and the booking/API flows.
 
 Provider credentials are not present in this environment, so live Click and Payme transactions are not exercised. Configure sandbox merchant credentials and callback URLs before attempting provider end-to-end tests. From the project folder run:
 
