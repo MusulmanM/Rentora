@@ -360,6 +360,30 @@ class AccountLocationAndProviderTests(StartAppBaseTest):
             phone_number="+998901234567", telegram_user_id="70001",
         ).exists())
 
+    @patch("core.telegram._call")
+    def test_telegram_start_greets_user_and_requests_contact(self, telegram_call):
+        update = {
+            "message": {
+                "text": "/start",
+                "from": {"id": 70001},
+                "chat": {"id": 70001, "type": "private"},
+            },
+        }
+        with override_settings(TELEGRAM_WEBHOOK_SECRET="webhook-secret"):
+            response = self.client.post(
+                reverse("telegram-webhook"),
+                data=json.dumps(update),
+                content_type="application/json",
+                HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN="webhook-secret",
+            )
+        self.assertEqual(response.status_code, 200)
+        telegram_call.assert_called_once()
+        method, payload = telegram_call.call_args.args
+        self.assertEqual(method, "sendMessage")
+        self.assertEqual(payload["chat_id"], "70001")
+        self.assertTrue(payload["text"].startswith("Hi!"))
+        self.assertTrue(payload["reply_markup"]["keyboard"][0][0]["request_contact"])
+
     def test_telegram_webhook_rejects_wrong_secret_and_shared_contact(self):
         denied = self.client.post(
             reverse("telegram-webhook"), data="{}", content_type="application/json",

@@ -38,7 +38,7 @@ def _call(method, payload):
 def request_contact(chat_id):
     return _call("sendMessage", {
         "chat_id": chat_id,
-        "text": "Rentora'da ro'yxatdan o'tish uchun telefon raqamingizni yuboring.",
+        "text": "Hi!\n\nRentora'da ro'yxatdan o'tish uchun telefon raqamingizni yuboring.",
         "reply_markup": {
             "keyboard": [[{"text": "Telefon raqamni yuborish", "request_contact": True}]],
             "resize_keyboard": True,
