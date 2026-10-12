@@ -164,7 +164,7 @@ class BookingOrder(models.Model):
     guests = models.PositiveSmallIntegerField("Mehmonlar / yo'lovchilar", default=1)
     payment_method = models.CharField("To'lov turi", max_length=20, choices=Booking.PaymentMethod.choices)
     total_price = models.DecimalField("Jami narx (so'm)", max_digits=14, decimal_places=2, default=Decimal("0.00"))
-    status = models.CharField("Holati", max_length=20, choices=Status.choices, default=Status.PENDING)
+    status = models.CharField("Holati", max_length=20, choices=Status.choices, default=Status.AWAITING_PAYMENT)
     booking = models.OneToOneField(Booking, on_delete=models.SET_NULL, related_name="paid_order", null=True, blank=True, verbose_name="Yaratilgan bron")
     created_at = models.DateTimeField(auto_now_add=True)
     accepted_at = models.DateTimeField(null=True, blank=True)

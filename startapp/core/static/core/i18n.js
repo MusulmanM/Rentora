@@ -21,7 +21,6 @@
     ["To'lash", "Оплатить", "Pay"],
     ["Qabul qilinishi kutilmoqda", "Ожидает принятия", "Awaiting acceptance"],
     ["To'lov kutilmoqda", "Ожидает оплаты", "Awaiting payment"],
-    ["Buyurtmangiz yuborildi. To'lov admin yoki mezbon buyurtmani qabul qilganidan keyin ochiladi.", "Заказ отправлен. Оплата станет доступна после его принятия администратором или хозяином.", "Your order was sent. Payment is available after the admin or host accepts it."],
     ["Buyurtma qabul qilindi. Naqd to'lovni xizmatni olganingizda amalga oshirasiz.", "Заказ принят. Оплатите наличными при получении услуги.", "Order received. Pay cash when you receive the service."],
     ["Ortiqcha qo'ng'iroqlar va chalkashliklarsiz, kerakli variantni topish uchun barcha muhim ma'lumot bir joyda.", "Без лишних звонков и путаницы: вся важная информация для выбора — в одном месте.", "No unnecessary calls or confusion — all the details you need in one place."],
     ["Safar uchun qulay uy yoki yo'l uchun ishonchli avtomobil. Barchasini bir joyda toping va bir necha qadamda bron qiling.", "Уютное жильё для поездки или надёжный автомобиль в дорогу. Найдите всё в одном месте и забронируйте за несколько шагов.", "A comfortable home for your trip or a reliable car for the road. Find everything in one place and book in a few steps."],

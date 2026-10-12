@@ -153,13 +153,13 @@ def create_booking(request, slug):
                         check_out=form.cleaned_data["check_out"],
                         guests=form.cleaned_data["guests"],
                         payment_method=form.cleaned_data["payment_method"],
+                        status=BookingOrder.Status.AWAITING_PAYMENT,
                     )
                     order.full_clean()
                     order.save()
             if form.cleaned_data["payment_method"] == Booking.PaymentMethod.CASH:
                 return redirect("my-bookings")
-            messages.success(request, "Buyurtmangiz yuborildi. To'lov admin yoki mezbon buyurtmani qabul qilganidan keyin ochiladi.")
-            return redirect("my-bookings")
+            return redirect("pay-booking-order", order_id=order.pk)
         except ValidationError as exc:
             if hasattr(exc, "message_dict"):
                 for field, errors in exc.message_dict.items():
@@ -194,7 +194,7 @@ def my_bookings(request):
 def pay_booking_order(request, order_id):
     order = get_object_or_404(BookingOrder, pk=order_id, user=request.user)
     if order.status != BookingOrder.Status.AWAITING_PAYMENT:
-        messages.error(request, "Buyurtma hali to'lov uchun qabul qilinmagan yoki endi faol emas.")
+        messages.error(request, "Buyurtma to'lov uchun tayyor emas yoki endi faol emas.")
         return redirect("my-bookings")
     try:
         return redirect(payment_url(order, request))

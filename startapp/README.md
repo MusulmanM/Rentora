@@ -10,11 +10,11 @@ Interfeys o'zbek (`UZ`), rus (`RU`) va ingliz (`EN`) tillarida mavjud. Yuqori qi
 - Uy va avtomobillar katalogi: shahar, turi, mehmon/yo'lovchi soni va sanalar bo'yicha qidiruv.
 - E'lon tafsilotlari, kunlik narx va sanalarga qarab jami summani avtomatik hisoblash.
 - Ro'yxatdan o'tish, tizimga kirish va shaxsiy bronlar sahifasi.
-- Naqd bronni darhol saqlash; Click/karta yoki Payme buyurtmalarini admin qabul qilgach to'liq onlayn to'lovga chiqarish.
+- Naqd bronni darhol saqlash; Click/karta yoki Payme tanlanganda mijozni buyurtmadan so'ng darhol onlayn to'lovga yo'naltirish.
 - Provayder to'lovi tasdiqlanmaguncha bron yozilmaydi; muvaffaqiyatli callback bronni tasdiqlaydi va sanalarni band qiladi.
 - Bron va buyurtmalarni bekor qilish; kutilayotgan buyurtmalar sanalarni boshqa mijozlardan vaqtincha band qiladi.
 - Bron holatlari: kutilmoqda, tasdiqlangan yoki bekor qilingan.
-- Django admin orqali e'lonlar va bronlarni boshqarish, onlayn buyurtmalarni qabul qilish/rad etish va nom hamda tavsiflarning ruscha/inglizcha versiyalarini saqlash.
+- Django admin orqali e'lonlar, bronlar va to'lov yozuvlarini ko'rish hamda nom va tavsiflarning ruscha/inglizcha versiyalarini saqlash.
 - JSON REST API va `/health/` health endpoint.
 - Telefon, planshet va desktop ekranlariga mos dizayn.
 - Demo uchun 8 ta uy/avtomobil e'lonini yaratadigan seed buyrug'i.
@@ -69,7 +69,7 @@ PAYME_MERCHANT_ID=
 PAYME_MERCHANT_KEY=
 ```
 
-Buyurtmalar admin panelda `To'lov kutilmoqda` holatiga qabul qilingandan keyin mijoz to'liq summani to'laydi. Django faqat provayder imzosi va muvaffaqiyatli callback tekshirilgach `Booking` yozuvini yaratadi. Karta va Click tanlovlari Click checkout'iga, Payme tanlovi Payme Business checkout'iga yo'naltiriladi. Test/sandbox uchun provider bergan test checkout URL va merchant credential'larini `CLICK_CHECKOUT_BASE_URL` hamda `PAYME_CHECKOUT_BASE_URL` orqali belgilang. Callback'lar ommaviy internetdan HTTPS orqali ochiq bo'lishi kerak.
+Buyurtma yuborilgach mijoz darhol tanlangan provayderning to'lov sahifasiga yo'naltiriladi; admin yoki mezbon tasdig'i talab qilinmaydi. Django faqat provayder imzosi va muvaffaqiyatli callback tekshirilgach `Booking` yozuvini yaratadi. Karta va Click tanlovlari Click checkout'iga, Payme tanlovi Payme Business checkout'iga yo'naltiriladi. Test/sandbox uchun provider bergan test checkout URL va merchant credential'larini `CLICK_CHECKOUT_BASE_URL` hamda `PAYME_CHECKOUT_BASE_URL` orqali belgilang. Callback'lar ommaviy internetdan HTTPS orqali ochiq bo'lishi kerak.
 
 Integratsiya protokollari: [Click hujjatlari](https://docs.click.uz/) va [Payme Business Merchant API](https://developer.help.paycom.uz/).
 
@@ -81,7 +81,7 @@ Kutubxonalarni o'rnatgandan so'ng:
 python manage.py test core
 ```
 
-Testlar bosh sahifa va til tanlagichni, filtrlarni, ro'yxatdan o'tishni, naqd bron, online buyurtma-tasdiqlash oqimi, Click/Payme callback'lari, sanalar to'qnashuvi, bekor qilish huquqlari va API ruxsatlarini tekshiradi. Python va frontend skriptlari sintaksisi ham alohida tekshiriladi. Tafsilotlar `TEST_REPORT.md` faylida.
+Testlar bosh sahifa va til tanlagichni, filtrlarni, ro'yxatdan o'tishni, naqd bron, admin aralashuvisiz onlayn to'lov oqimi, Click/Payme callback'lari, sanalar to'qnashuvi, bekor qilish huquqlari va API ruxsatlarini tekshiradi. Python va frontend skriptlari sintaksisi ham alohida tekshiriladi. Tafsilotlar `TEST_REPORT.md` faylida.
 
 ## API yo'llari
 
