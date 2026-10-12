@@ -63,7 +63,7 @@ LISTINGS = [
 
 
 class Command(BaseCommand):
-    help = "StartApp uchun namuna uy va avtomobil e'lonlarini yaratadi."
+    help = "Rentora uchun namuna uy va avtomobil e'lonlarini yaratadi."
 
     def handle(self, *args, **options):
         created = 0

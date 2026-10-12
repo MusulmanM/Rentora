@@ -34,6 +34,8 @@ class WebsiteTests(StartAppBaseTest):
     def test_home_page_renders_listings(self):
         response = self.client.get(reverse("home"))
         self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Rentora")
+        self.assertNotContains(response, "StartApp")
         self.assertContains(response, "Keyingi manzilingiz")
         self.assertContains(response, "Test apartment")
         self.assertContains(response, "Test car")
@@ -63,6 +65,7 @@ class WebsiteTests(StartAppBaseTest):
         response = self.client.get(reverse("health"))
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "ok")
+        self.assertEqual(response.json()["app"], "Rentora")
 
     def test_registration_creates_user_and_logs_in(self):
         response = self.client.post(reverse("register"), {
@@ -86,12 +89,13 @@ class BookingTests(StartAppBaseTest):
     def test_user_can_create_booking_and_total_is_calculated(self):
         self.client.login(username="demo-user", password="SafePass123!")
         response = self.client.post(reverse("create-booking", args=[self.home.slug]), {
-            "check_in": self.tomorrow.isoformat(), "check_out": self.day_after.isoformat(), "guests": 2,
+            "check_in": self.tomorrow.isoformat(), "check_out": self.day_after.isoformat(), "guests": 2, "payment_method": "card",
         })
         self.assertRedirects(response, reverse("my-bookings"))
         booking = Booking.objects.get(user=self.user, listing=self.home)
         self.assertEqual(booking.total_price, Decimal("500000"))
         self.assertEqual(booking.days, 2)
+        self.assertEqual(booking.payment_method, Booking.PaymentMethod.CARD)
 
     def test_overlapping_booking_is_rejected(self):
         Booking.objects.create(
@@ -176,10 +180,11 @@ class ApiTests(StartAppBaseTest):
         self.api.force_authenticate(user=self.user)
         response = self.api.post(reverse("api-bookings"), {
             "listing": self.home.pk, "check_in": self.tomorrow.isoformat(),
-            "check_out": self.day_after.isoformat(), "guests": 2,
+            "check_out": self.day_after.isoformat(), "guests": 2, "payment_method": "click",
         }, format="json")
         self.assertEqual(response.status_code, 201, response.data)
         self.assertEqual(Decimal(response.data["total_price"]), Decimal("500000.00"))
+        self.assertEqual(response.data["payment_method"], "click")
 
     def test_booking_api_does_not_accept_inactive_listing(self):
         self.home.is_active = False

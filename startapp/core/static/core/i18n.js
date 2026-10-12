@@ -1,4 +1,4 @@
-/* Lightweight client-side localization for the StartApp interface. */
+/* Lightweight client-side localization for the Rentora interface. */
 (() => {
   'use strict';
 
@@ -98,7 +98,7 @@
     ["Tavsif", "Описание", "Description"],
     ["Joylashuv", "Расположение", "Location"],
     ["Aniq manzil bron tasdiqlanish jarayonida mezbon bilan kelishiladi.", "Точный адрес согласовывается с хозяином при подтверждении бронирования.", "The exact address is confirmed with the host during booking confirmation."],
-    ["STARTAPP BRONI", "БРОНИРОВАНИЕ STARTAPP", "STARTAPP BOOKING"],
+    ["RENTORA BRONI", "БРОНИРОВАНИЕ RENTORA", "RENTORA BOOKING"],
     ["Sanalarni tanlang", "Выберите даты", "Choose dates"],
     ["Kelish / boshlanish", "Заезд / начало", "Check-in / start"],
     ["Ketish / tugash", "Выезд / окончание", "Check-out / end"],
@@ -139,7 +139,7 @@
     ["Bir necha soniyada ro'yxatdan o'ting va bron qilishni boshlang.", "Зарегистрируйтесь за несколько секунд и начните бронировать.", "Sign up in seconds and start booking."],
     ["Hisob yaratish", "Создать аккаунт", "Create account"],
     ["Hisobingiz bormi?", "Уже есть аккаунт?", "Already have an account?"],
-    ["STARTAPP · IJARA QILISHNING OSON USULI", "STARTAPP · ПРОСТОЙ СПОСОБ АРЕНДЫ", "STARTAPP · THE EASY WAY TO RENT"],
+    ["RENTORA · IJARA QILISHNING OSON USULI", "RENTORA · ПРОСТОЙ СПОСОБ АРЕНДЫ", "RENTORA · THE EASY WAY TO RENT"],
     ["Ism", "Имя", "First name"],
     ["Ismingiz", "Ваше имя", "Your first name"],
     ["Elektron pochta", "Электронная почта", "Email address"],
@@ -177,9 +177,9 @@
     ["Tafsilotlari", "Подробнее", "Details"],
     ["turar joy va avtomobil ijarasi", "аренда жилья и автомобилей", "home and car rentals"],
     ["Ijara endi oson", "Аренда стала проще", "Renting made easy"],
-    ["Kirish — StartApp", "Вход — StartApp", "Log in — StartApp"],
-    ["Ro'yxatdan o'tish — StartApp", "Регистрация — StartApp", "Sign up — StartApp"],
-    ["Bronlarim — StartApp", "Мои бронирования — StartApp", "My bookings — StartApp"],
+    ["Kirish — Rentora", "Вход — Rentora", "Log in — Rentora"],
+    ["Ro'yxatdan o'tish — Rentora", "Регистрация — Rentora", "Sign up — Rentora"],
+    ["Bronlarim — Rentora", "Мои бронирования — Rentora", "My bookings — Rentora"],
     ["Barcha variantlarni", "Все варианты", "All options"],
     ["bron", "бронирование", "booking"],
     ["Natijalar", "Результаты", "Results"],
@@ -290,14 +290,14 @@
       if (value !== null && value !== undefined) element.setAttribute(attribute, value);
     });
     const localizedPageTitle = document.querySelector('[data-localized-page-title]');
-    if (localizedPageTitle) document.title = `${localizedPageTitle.textContent.trim()} — StartApp`;
+    if (localizedPageTitle) document.title = `${localizedPageTitle.textContent.trim()} — Rentora`;
 
     const meta = document.querySelector('meta[name="description"]');
     if (meta) {
       const descriptions = {
-        uz: "StartApp — O'zbekistonda uy va avtomobilni oson toping va bron qiling.",
-        ru: 'StartApp — легко находите и бронируйте жильё и автомобили в Узбекистане.',
-        en: 'StartApp — easily find and book homes and cars in Uzbekistan.'
+        uz: "Rentora — O'zbekistonda uy va avtomobilni oson toping va bron qiling.",
+        ru: 'Rentora — легко находите и бронируйте жильё и автомобили в Узбекистане.',
+        en: 'Rentora — easily find and book homes and cars in Uzbekistan.'
       };
       meta.content = descriptions[currentLanguage];
     }

@@ -78,11 +78,18 @@ class Booking(models.Model):
         CONFIRMED = "confirmed", "Tasdiqlangan"
         CANCELLED = "cancelled", "Bekor qilingan"
 
+    class PaymentMethod(models.TextChoices):
+        CASH = "cash", "Naqd"
+        CARD = "card", "Karta"
+        CLICK = "click", "Click"
+        PAYME = "payme", "Payme"
+
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="bookings", verbose_name="Foydalanuvchi")
     listing = models.ForeignKey(RentalListing, on_delete=models.PROTECT, related_name="bookings", verbose_name="E'lon")
     check_in = models.DateField("Boshlanish sanasi")
     check_out = models.DateField("Tugash sanasi")
     guests = models.PositiveSmallIntegerField("Mehmonlar / yo'lovchilar", default=1)
+    payment_method = models.CharField("To'lov turi", max_length=20, choices=PaymentMethod.choices, default=PaymentMethod.CASH)
     total_price = models.DecimalField("Jami narx (so'm)", max_digits=14, decimal_places=2, default=Decimal("0.00"))
     status = models.CharField("Holati", max_length=12, choices=Status.choices, default=Status.PENDING)
     created_at = models.DateTimeField(auto_now_add=True)

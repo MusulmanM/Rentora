@@ -171,7 +171,7 @@ def cancel_booking(request, booking_id):
 
 @require_GET
 def health(request):
-    return JsonResponse({"status": "ok", "app": "StartApp Rental", "time": timezone.now().isoformat()})
+    return JsonResponse({"status": "ok", "app": "Rentora", "time": timezone.now().isoformat()})
 
 
 @api_view(["GET"])

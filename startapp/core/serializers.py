@@ -34,13 +34,14 @@ class BookingSerializer(serializers.ModelSerializer):
     listing_city = serializers.CharField(source="listing.city", read_only=True)
     listing_image = serializers.CharField(source="listing.image_url", read_only=True)
     status_label = serializers.CharField(source="get_status_display", read_only=True)
+    payment_method_label = serializers.CharField(source="get_payment_method_display", read_only=True)
     days = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = Booking
         fields = [
             "id", "listing", "listing_title", "listing_city", "listing_image", "check_in", "check_out",
-            "guests", "days", "total_price", "status", "status_label", "created_at",
+            "guests", "payment_method", "payment_method_label", "days", "total_price", "status", "status_label", "created_at",
         ]
         read_only_fields = ["id", "total_price", "status", "created_at"]
 

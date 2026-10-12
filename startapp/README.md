@@ -1,6 +1,5 @@
-# StartApp — uy va avtomobil ijarasi
-
-StartApp — uy va avtomobillarni qidirish hamda bron qilish uchun full-stack veb-ilova. Frontend Django templates, CSS va JavaScript bilan, backend Django + Django REST Framework bilan ishlaydi. SQLite standart baza sifatida ishlatiladi, alohida PostgreSQL yoki Docker o'rnatish shart emas.
+# Rentora — uy va avtomobil ijarasi
+Rentora — uy va avtomobillarni qidirish hamda bron qilish uchun full-stack veb-ilova. Frontend Django templates, CSS va JavaScript bilan, backend Django + Django REST Framework bilan ishlaydi. SQLite standart baza sifatida ishlatiladi, alohida PostgreSQL yoki Docker o'rnatish shart emas.
 
 ## Til tanlash
 
