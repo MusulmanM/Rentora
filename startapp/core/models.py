@@ -1,4 +1,5 @@
 from decimal import Decimal
+import uuid
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -128,17 +129,121 @@ class Booking(models.Model):
                 conflicts = conflicts.exclude(pk=self.pk)
             if conflicts.exists():
                 errors["check_in"] = "Bu sanalarda e'lon band. Boshqa sanalarni tanlang."
+            if BookingOrder.objects.filter(
+                listing_id=self.listing_id,
+                status__in=[BookingOrder.Status.PENDING, BookingOrder.Status.AWAITING_PAYMENT],
+                check_in__lt=self.check_out,
+                check_out__gt=self.check_in,
+            ).exists():
+                errors["check_in"] = "Bu sanalarda e'lon uchun to'lov kutilayotgan buyurtma bor."
         if errors:
             raise ValidationError(errors)
 
     def save(self, *args, **kwargs):
-        if self.listing_id and self.check_in and self.check_out and self.check_out > self.check_in:
+        if not self.pk and not self.total_price and self.listing_id and self.check_in and self.check_out and self.check_out > self.check_in:
             self.total_price = self.listing.price_per_day * (self.check_out - self.check_in).days
         super().save(*args, **kwargs)
 
     def __str__(self):
         return f"Bron #{self.pk or 'yangi'} — {self.listing.title}"
-    
+
+
+class BookingOrder(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Qabul qilinishi kutilmoqda"
+        AWAITING_PAYMENT = "awaiting_payment", "To'lov kutilmoqda"
+        PAID = "paid", "To'langan"
+        REJECTED = "rejected", "Rad etilgan"
+        CANCELLED = "cancelled", "Bekor qilingan"
+
+    reference = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="booking_orders", verbose_name="Foydalanuvchi")
+    listing = models.ForeignKey(RentalListing, on_delete=models.PROTECT, related_name="booking_orders", verbose_name="E'lon")
+    check_in = models.DateField("Boshlanish sanasi")
+    check_out = models.DateField("Tugash sanasi")
+    guests = models.PositiveSmallIntegerField("Mehmonlar / yo'lovchilar", default=1)
+    payment_method = models.CharField("To'lov turi", max_length=20, choices=Booking.PaymentMethod.choices)
+    total_price = models.DecimalField("Jami narx (so'm)", max_digits=14, decimal_places=2, default=Decimal("0.00"))
+    status = models.CharField("Holati", max_length=20, choices=Status.choices, default=Status.PENDING)
+    booking = models.OneToOneField(Booking, on_delete=models.SET_NULL, related_name="paid_order", null=True, blank=True, verbose_name="Yaratilgan bron")
+    created_at = models.DateTimeField(auto_now_add=True)
+    accepted_at = models.DateTimeField(null=True, blank=True)
+    paid_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Bron buyurtmasi"
+        verbose_name_plural = "Bron buyurtmalari"
+        indexes = [
+            models.Index(fields=["listing", "check_in", "check_out", "status"], name="core_order_dates_status_idx"),
+        ]
+
+    @property
+    def days(self):
+        return max((self.check_out - self.check_in).days, 0)
+
+    def clean(self):
+        errors = {}
+        if self.check_in and self.check_out:
+            if self.check_in < timezone.localdate():
+                errors["check_in"] = "Boshlanish sanasi bugundan oldin bo'lishi mumkin emas."
+            if self.check_out <= self.check_in:
+                errors["check_out"] = "Tugash sanasi boshlanish sanasidan keyin bo'lishi kerak."
+        if self.guests is not None and self.guests < 1:
+            errors["guests"] = "Kamida 1 kishi bo'lishi kerak."
+        if self.listing_id and self.guests and self.guests > self.listing.capacity:
+            errors["guests"] = f"Bu e'lon uchun eng ko'p sig'im: {self.listing.capacity}."
+        if self.listing_id and self.check_in and self.check_out and self.check_out > self.check_in:
+            conflicts = Booking.objects.filter(
+                listing_id=self.listing_id,
+                status__in=[Booking.Status.PENDING, Booking.Status.CONFIRMED],
+                check_in__lt=self.check_out,
+                check_out__gt=self.check_in,
+            )
+            if conflicts.exists():
+                errors["check_in"] = "Bu sanalarda e'lon band. Boshqa sanalarni tanlang."
+            orders = BookingOrder.objects.filter(
+                listing_id=self.listing_id,
+                status__in=[self.Status.PENDING, self.Status.AWAITING_PAYMENT],
+                check_in__lt=self.check_out,
+                check_out__gt=self.check_in,
+            )
+            if self.pk:
+                orders = orders.exclude(pk=self.pk)
+            if orders.exists():
+                errors["check_in"] = "Bu sanalarda e'lon band. Boshqa sanalarni tanlang."
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        if not self.pk and self.listing_id and self.check_in and self.check_out and self.check_out > self.check_in:
+            self.total_price = self.listing.price_per_day * (self.check_out - self.check_in).days
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"Buyurtma {self.reference} — {self.listing.title}"
+
+
+class PaymentTransaction(models.Model):
+    class Provider(models.TextChoices):
+        CLICK = "click", "Click"
+        PAYME = "payme", "Payme"
+
+    booking_order = models.ForeignKey(BookingOrder, on_delete=models.PROTECT, related_name="payments")
+    provider = models.CharField(max_length=10, choices=Provider.choices)
+    provider_transaction_id = models.CharField(max_length=100, unique=True)
+    amount = models.DecimalField(max_digits=14, decimal_places=2)
+    state = models.SmallIntegerField(default=1)
+    created_at = models.DateTimeField(auto_now_add=True)
+    performed_at = models.DateTimeField(null=True, blank=True)
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "To'lov tranzaksiyasi"
+        verbose_name_plural = "To'lov tranzaksiyalari"
+
+    def __str__(self):
+        return f"{self.provider} — {self.provider_transaction_id}"
 
 
 

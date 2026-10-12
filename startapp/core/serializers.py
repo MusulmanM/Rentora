@@ -2,7 +2,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from rest_framework import serializers
 
-from .models import Booking, RentalListing, home, car
+from .models import Booking, BookingOrder, RentalListing, home, car
 
 
 class homeSerializer(serializers.ModelSerializer):
@@ -33,6 +33,7 @@ class BookingSerializer(serializers.ModelSerializer):
     listing_title = serializers.CharField(source="listing.title", read_only=True)
     listing_city = serializers.CharField(source="listing.city", read_only=True)
     listing_image = serializers.CharField(source="listing.image_url", read_only=True)
+    status = serializers.CharField(read_only=True)
     status_label = serializers.CharField(source="get_status_display", read_only=True)
     payment_method_label = serializers.CharField(source="get_payment_method_display", read_only=True)
     days = serializers.IntegerField(read_only=True)
@@ -73,15 +74,24 @@ class BookingSerializer(serializers.ModelSerializer):
             conflicts = conflicts.exclude(pk=self.instance.pk)
         if conflicts.exists():
             raise serializers.ValidationError({"check_in": "Bu e'lon tanlangan sanalarda band."})
+        if BookingOrder.objects.filter(
+            listing=listing,
+            status__in=[BookingOrder.Status.PENDING, BookingOrder.Status.AWAITING_PAYMENT],
+            check_in__lt=check_out,
+            check_out__gt=check_in,
+        ).exists():
+            raise serializers.ValidationError({"check_in": "Bu e'lon tanlangan sanalarda boshqa buyurtma uchun band."})
         return attrs
 
     def create(self, validated_data):
         listing = validated_data.pop("listing")
+        payment_method = validated_data.get("payment_method", Booking.PaymentMethod.CASH)
         with transaction.atomic():
             listing = RentalListing.objects.select_for_update().filter(pk=listing.pk, is_active=True).first()
             if listing is None:
                 raise serializers.ValidationError({"listing": "Bu e'lon hozir faol emas."})
-            booking = Booking(user=self.context["request"].user, listing=listing, **validated_data)
+            model = Booking if payment_method == Booking.PaymentMethod.CASH else BookingOrder
+            booking = model(user=self.context["request"].user, listing=listing, **validated_data)
             try:
                 booking.full_clean()
             except DjangoValidationError as exc:

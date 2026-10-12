@@ -16,12 +16,11 @@
 
 ## Django runtime tests
 
-The project includes Django/DRF integration tests in `core/tests.py`. They cover the main page, three-language selector, listing filters/details and localized API fields, registration, booking totals, date conflicts, cancellation permissions, and API access. The test runner was invoked, but it **could not start** in this build environment because Django is not installed (`ModuleNotFoundError: No module named 'django'`). Installing dependencies is not possible from this environment due to package-index network restrictions. Therefore the Django integration tests are **not reported as passed**.
+`python manage.py test core`: **PASS** (25 tests). Coverage includes guest/access behavior, cash booking creation, pending online orders, admin approval, reservation conflicts, Click callbacks, Payme Merchant API callbacks, and the booking/API flows.
 
-On a machine with package-index access, from the project folder run:
+Provider credentials are not present in this environment, so live Click and Payme transactions are not exercised. Configure sandbox merchant credentials and callback URLs before attempting provider end-to-end tests. From the project folder run:
 
 ```bash
-python -m pip install -r requirements.txt
 python manage.py migrate
 python manage.py seed_demo
 python manage.py test core

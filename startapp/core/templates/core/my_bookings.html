@@ -2,7 +2,54 @@
 {% load core_tags %}
 {% block title %}Bronlarim — Rentora{% endblock %}
 {% block content %}
-<header class="site-header wrap"><a class="brand" href="{% url 'home' %}"><span class="brand-symbol"><i></i><i></i><i></i></span><span>Rentora</span></a><nav class="main-nav"><a href="{% url 'home' %}">Bosh sahifa</a><a class="nav-active" href="{% url 'my-bookings' %}">Bronlarim</a></nav><div class="header-actions">{% include 'core/language_switcher.html' %}<span class="user-pill">{{ request.user.first_name|default:request.user.username|first|upper }}</span><form method="post" action="{% url 'logout' %}" class="inline-form">{% csrf_token %}<button class="btn btn-outline btn-small" type="submit">Chiqish</button></form></div><a class="mobile-back" href="{% url 'home' %}">← Bosh sahifa</a></header>
-<main class="bookings-main wrap"><div class="bookings-welcome"><div><p class="section-kicker">SHAXSIY KABINET</p><h1>Bronlaringiz <span class="welcome-star">✦</span></h1><p>Salom, {{ request.user.first_name|default:request.user.username }}! Safar rejalaringiz shu yerda saqlanadi.</p></div><a class="btn btn-dark" href="{% url 'home' %}#listings">＋ Yangi ijara topish</a></div><div class="booking-summary-strip"><div><span>Jami bronlar</span><strong>{{ bookings|length }}</strong></div><div><span>Kutilmoqda / tasdiqlangan</span><strong>{{ active_bookings_count }}</strong></div><div class="booking-summary-note">Bron holati o'zgarsa, shu sahifadan kuzatishingiz mumkin.</div></div>
-{% if bookings %}<div class="my-bookings-list">{% for booking in bookings %}<article class="my-booking-card"><a class="my-booking-image" href="{% url 'listing-detail' booking.listing.slug %}"><img src="{{ booking.listing.image_url|default:'https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=600&q=80' }}" alt="{{ booking.listing.title }}" data-localized-attribute="alt" data-uz="{{ booking.listing.title }}" data-ru="{{ booking.listing.title_ru|default:booking.listing.title }}" data-en="{{ booking.listing.title_en|default:booking.listing.title }}"></a><div class="my-booking-info"><div class="my-booking-topline"><span class="booking-type-label">{% if booking.listing.is_home %}⌂ Uy{% else %}▱ Avtomobil{% endif %}</span><span class="booking-status status-{{ booking.status }}">{{ booking.get_status_display }}</span></div><h2><a href="{% url 'listing-detail' booking.listing.slug %}" data-localized-text data-uz="{{ booking.listing.title }}" data-ru="{{ booking.listing.title_ru|default:booking.listing.title }}" data-en="{{ booking.listing.title_en|default:booking.listing.title }}">{{ booking.listing.title }}</a></h2><p class="booking-city">⌖ {{ booking.listing.city }} · {{ booking.listing.address }}</p><div class="booking-date-row"><span><small>BOSHLANISH</small><b>{{ booking.check_in|date:'d.m.Y' }}</b></span><span class="date-arrow">→</span><span><small>TUGASH</small><b>{{ booking.check_out|date:'d.m.Y' }}</b></span><span><small>DAVOMIYLIGI</small><b>{{ booking.days }} kun</b></span></div><div class="booking-payment-row"><span><small>TO'LOV</small><b>{{ booking.get_payment_method_display }}</b></span></div></div><div class="my-booking-total"><small>JAMI NARX</small><strong>{{ booking.total_price|money }} <small>so'm</small></strong>{% if booking.status != 'cancelled' %}<form method="post" action="{% url 'cancel-booking' booking.id %}" data-confirm="Ushbu bronni bekor qilmoqchimisiz?">{% csrf_token %}<button class="cancel-booking" type="submit">Bronni bekor qilish</button></form>{% else %}<span class="cancelled-note">Bron bekor qilingan</span>{% endif %}</div></article>{% endfor %}</div>{% else %}<div class="empty-bookings"><div class="empty-bookings-art">⌂</div><h2>Hali bronlaringiz yo'q</h2><p>O'zingizga mos uy yoki avtomobilni toping — rejalaringizni shu yerdan boshlang.</p><a class="btn btn-dark" href="{% url 'home' %}#listings">Ijara variantlarini ko'rish <span>→</span></a></div>{% endif %}</main><footer class="site-footer wrap"><a class="brand" href="{% url 'home' %}"><span class="brand-symbol"><i></i><i></i><i></i></span><span>Rentora</span></a><p>Barcha rejalaringiz bir joyda.</p><div class="footer-right"><a href="{% url 'home' %}">Bosh sahifa</a><span>© {% now "Y" %} Rentora</span></div></footer>
+<header class="site-header wrap">
+  <a class="brand" href="{% url 'home' %}"><span class="brand-symbol"><i></i><i></i><i></i></span><span>Rentora</span></a>
+  <nav class="main-nav"><a href="{% url 'home' %}">Bosh sahifa</a><a class="nav-active" href="{% url 'my-bookings' %}">Bronlarim</a></nav>
+  <div class="header-actions">{% include 'core/language_switcher.html' %}<span class="user-pill">{{ request.user.first_name|default:request.user.username|first|upper }}</span><form method="post" action="{% url 'logout' %}" class="inline-form">{% csrf_token %}<button class="btn btn-outline btn-small" type="submit">Chiqish</button></form></div>
+  <a class="mobile-back" href="{% url 'home' %}">← Bosh sahifa</a>
+</header>
+<main class="bookings-main wrap">
+  <div class="bookings-welcome"><div><p class="section-kicker">SHAXSIY KABINET</p><h1>Bronlaringiz <span class="welcome-star">✦</span></h1><p>Salom, {{ request.user.first_name|default:request.user.username }}! Safar rejalaringiz shu yerda saqlanadi.</p></div><a class="btn btn-dark" href="{% url 'home' %}#listings">＋ Yangi ijara topish</a></div>
+  <div class="booking-summary-strip"><div><span>Jami bronlar</span><strong>{{ bookings|length }}</strong></div><div><span>Kutilmoqda / tasdiqlangan</span><strong>{{ active_bookings_count }}</strong></div><div class="booking-summary-note">Bron holati o'zgarsa, shu sahifadan kuzatishingiz mumkin.</div></div>
+
+  {% if booking_orders %}
+  <section class="my-bookings-list" aria-label="Buyurtmalar">
+    {% for order in booking_orders %}
+    <article class="my-booking-card">
+      <div class="my-booking-info">
+        <div class="my-booking-topline"><span class="booking-type-label">BUYURTMA</span><span class="booking-status status-pending">{{ order.get_status_display }}</span></div>
+        <h2><a href="{% url 'listing-detail' order.listing.slug %}">{{ order.listing.title }}</a></h2>
+        <p class="booking-city">⌖ {{ order.listing.city }} · {{ order.listing.address }}</p>
+        <div class="booking-date-row"><span><small>BOSHLANISH</small><b>{{ order.check_in|date:'d.m.Y' }}</b></span><span class="date-arrow">→</span><span><small>TUGASH</small><b>{{ order.check_out|date:'d.m.Y' }}</b></span><span><small>TO'LOV</small><b>{{ order.get_payment_method_display }}</b></span></div>
+      </div>
+      <div class="my-booking-total"><small>TO'LANADIGAN SUMMA</small><strong>{{ order.total_price|money }} <small>so'm</small></strong>
+        {% if order.status == 'awaiting_payment' %}<a class="btn btn-dark" href="{% url 'pay-booking-order' order.id %}">To'lash</a>{% endif %}
+        {% if order.status == 'pending' or order.status == 'awaiting_payment' %}<form method="post" action="{% url 'cancel-booking-order' order.id %}" data-confirm="Buyurtmani bekor qilmoqchimisiz?">{% csrf_token %}<button class="cancel-booking" type="submit">Buyurtmani bekor qilish</button></form>{% endif %}
+      </div>
+    </article>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  {% if bookings %}
+  <div class="my-bookings-list">
+    {% for booking in bookings %}
+    <article class="my-booking-card">
+      <a class="my-booking-image" href="{% url 'listing-detail' booking.listing.slug %}"><img src="{{ booking.listing.image_url|default:'https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=600&q=80' }}" alt="{{ booking.listing.title }}" data-localized-attribute="alt" data-uz="{{ booking.listing.title }}" data-ru="{{ booking.listing.title_ru|default:booking.listing.title }}" data-en="{{ booking.listing.title_en|default:booking.listing.title }}"></a>
+      <div class="my-booking-info">
+        <div class="my-booking-topline"><span class="booking-type-label">{% if booking.listing.is_home %}⌂ Uy{% else %}▱ Avtomobil{% endif %}</span><span class="booking-status status-{{ booking.status }}">{{ booking.get_status_display }}</span></div>
+        <h2><a href="{% url 'listing-detail' booking.listing.slug %}" data-localized-text data-uz="{{ booking.listing.title }}" data-ru="{{ booking.listing.title_ru|default:booking.listing.title }}" data-en="{{ booking.listing.title_en|default:booking.listing.title }}">{{ booking.listing.title }}</a></h2>
+        <p class="booking-city">⌖ {{ booking.listing.city }} · {{ booking.listing.address }}</p>
+        <div class="booking-date-row"><span><small>BOSHLANISH</small><b>{{ booking.check_in|date:'d.m.Y' }}</b></span><span class="date-arrow">→</span><span><small>TUGASH</small><b>{{ booking.check_out|date:'d.m.Y' }}</b></span><span><small>DAVOMIYLIGI</small><b>{{ booking.days }} kun</b></span></div>
+        <div class="booking-payment-row"><span><small>TO'LOV</small><b>{{ booking.get_payment_method_display }}</b></span></div>
+      </div>
+      <div class="my-booking-total"><small>JAMI NARX</small><strong>{{ booking.total_price|money }} <small>so'm</small></strong>{% if booking.status != 'cancelled' %}<form method="post" action="{% url 'cancel-booking' booking.id %}" data-confirm="Ushbu bronni bekor qilmoqchimisiz?">{% csrf_token %}<button class="cancel-booking" type="submit">Bronni bekor qilish</button></form>{% else %}<span class="cancelled-note">Bron bekor qilingan</span>{% endif %}</div>
+    </article>
+    {% endfor %}
+  </div>
+  {% elif not booking_orders %}
+  <div class="empty-bookings"><div class="empty-bookings-art">⌂</div><h2>Hali bronlaringiz yo'q</h2><p>O'zingizga mos uy yoki avtomobilni toping — rejalaringizni shu yerdan boshlang.</p><a class="btn btn-dark" href="{% url 'home' %}#listings">Ijara variantlarini ko'rish <span>→</span></a></div>
+  {% endif %}
+</main>
+<footer class="site-footer wrap"><a class="brand" href="{% url 'home' %}"><span class="brand-symbol"><i></i><i></i><i></i></span><span>Rentora</span></a><p>Barcha rejalaringiz bir joyda.</p><div class="footer-right"><a href="{% url 'home' %}">Bosh sahifa</a><span>© {% now "Y" %} Rentora</span></div></footer>
 {% endblock %}

@@ -1,4 +1,5 @@
 """Settings for the Rentora project."""
+import base64
 import os
 from pathlib import Path
 
@@ -18,6 +19,17 @@ DEBUG = os.environ.get("DJANGO_DEBUG", "1").strip().lower() in {"1", "true", "ye
 ALLOWED_HOSTS = [host.strip() for host in os.environ.get(
     "DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost,testserver"
 ).split(",") if host.strip()]
+CLICK_SERVICE_ID = os.environ.get("CLICK_SERVICE_ID", "")
+CLICK_MERCHANT_ID = os.environ.get("CLICK_MERCHANT_ID", "")
+CLICK_SECRET_KEY = os.environ.get("CLICK_SECRET_KEY", "")
+CLICK_CHECKOUT_BASE_URL = os.environ.get("CLICK_CHECKOUT_BASE_URL", "https://my.click.uz/services/pay")
+PAYME_MERCHANT_ID = os.environ.get("PAYME_MERCHANT_ID", "")
+PAYME_MERCHANT_KEY = os.environ.get("PAYME_MERCHANT_KEY", "")
+PAYME_MERCHANT_AUTHORIZATION = (
+    "Basic " + base64.b64encode(f"Paycom:{PAYME_MERCHANT_KEY}".encode()).decode()
+    if PAYME_MERCHANT_KEY else ""
+)
+PAYME_CHECKOUT_BASE_URL = os.environ.get("PAYME_CHECKOUT_BASE_URL", "https://checkout.paycom.uz")
 
 INSTALLED_APPS = [
     "django.contrib.admin",
