@@ -1,0 +1,251 @@
+import json
+import logging
+from datetime import date
+from decimal import Decimal, InvalidOperation
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
+
+from django.conf import settings
+from django.db.models import Q
+from django.urls import reverse
+from django.utils import timezone
+
+from .models import Booking, BookingOrder, RentalListing
+
+logger = logging.getLogger(__name__)
+
+_OPENAI_URL = "https://api.openai.com/v1/chat/completions"
+_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "task": {"type": "string", "enum": ["search", "calculate", "search_and_calculate", "out_of_scope"]},
+        "kind": {"type": ["string", "null"], "enum": ["home", "car", None]},
+        "city": {"type": ["string", "null"]},
+        "guests": {"type": ["integer", "null"]},
+        "bedrooms": {"type": ["integer", "null"]},
+        "min_price": {"type": ["number", "null"]},
+        "max_price": {"type": ["number", "null"]},
+        "listing_search": {"type": ["string", "null"]},
+        "sort_by": {"type": "string", "enum": ["recommended", "price_low", "price_high", "newest"]},
+        "rental_days": {"type": ["integer", "null"]},
+        "check_in": {"type": ["string", "null"]},
+        "check_out": {"type": ["string", "null"]},
+    },
+    "required": [
+        "task", "kind", "city", "guests", "bedrooms", "min_price", "max_price",
+        "listing_search", "sort_by", "rental_days", "check_in", "check_out",
+    ],
+    "additionalProperties": False,
+}
+
+
+class RentalAssistantError(Exception):
+    def __init__(self, message, status_code=502):
+        self.status_code = status_code
+        super().__init__(message)
+
+
+def _interpret_request(message):
+    api_key = getattr(settings, "OPENAI_API_KEY", "")
+    if not api_key:
+        raise RentalAssistantError("AI qidiruv uchun OPENAI_API_KEY sozlanmagan.", status_code=503)
+
+    today = timezone.localdate()
+    payload = {
+        "model": getattr(settings, "OPENAI_MODEL", "gpt-4o-mini"),
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You are a narrowly scoped rental search parser for Rentora. "
+                    "Only classify and extract rental listing filters, listing sorting, or rental price calculations. "
+                    "Never answer unrelated questions. Set task=out_of_scope for anything else. "
+                    "Return only the schema fields. Prices are Uzbek som per day. "
+                    "Convert relative dates using today's date, which is " + today.isoformat() + ". "
+                    "Set rental_days only when the user requests a rental duration or provides a valid date range. "
+                    "Do not invent a city, budget, guests, bedrooms, listing, or dates."
+                ),
+            },
+            {"role": "user", "content": message},
+        ],
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {"name": "rental_request", "strict": True, "schema": _SCHEMA},
+        },
+    }
+    request = Request(
+        _OPENAI_URL,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=20) as response:
+            result = json.loads(response.read())
+    except HTTPError as exc:
+        logger.warning("OpenAI rental assistant returned HTTP %s", exc.code)
+        raise RentalAssistantError("AI xizmati hozir so'rovni bajara olmadi.") from exc
+    except URLError as exc:
+        logger.warning("OpenAI rental assistant connection failed: %s", exc.reason)
+        raise RentalAssistantError("AI xizmatiga ulanib bo'lmadi. Birozdan keyin qayta urinib ko'ring.") from exc
+    except TimeoutError as exc:
+        logger.warning("OpenAI rental assistant request timed out")
+        raise RentalAssistantError("AI xizmatiga ulanib bo'lmadi. Birozdan keyin qayta urinib ko'ring.") from exc
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        logger.exception("OpenAI rental assistant returned invalid JSON")
+        raise RentalAssistantError("AI xizmatidan noto'g'ri javob olindi.") from exc
+
+    try:
+        content = result["choices"][0]["message"]["content"]
+        parsed = json.loads(content)
+    except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
+        logger.exception("OpenAI rental assistant response did not match the expected schema")
+        raise RentalAssistantError("AI xizmatidan noto'g'ri javob olindi.") from exc
+    if not isinstance(parsed, dict):
+        raise RentalAssistantError("AI xizmatidan noto'g'ri javob olindi.")
+    return parsed
+
+
+def _validated_criteria(criteria):
+    if criteria.get("task") == "out_of_scope":
+        return None
+    if criteria.get("task") not in {"search", "calculate", "search_and_calculate"}:
+        raise RentalAssistantError("AI qidiruv mezonlarini aniqlay olmadi.")
+
+    kind = criteria.get("kind")
+    if kind not in (None, RentalListing.Kind.HOME, RentalListing.Kind.CAR):
+        raise RentalAssistantError("Ijara turi noto'g'ri aniqlandi.")
+    city = criteria.get("city")
+    listing_search = criteria.get("listing_search")
+    if city is not None and (not isinstance(city, str) or len(city) > 80):
+        raise RentalAssistantError("Shahar filtri noto'g'ri aniqlandi.")
+    if listing_search is not None and (not isinstance(listing_search, str) or len(listing_search) > 100):
+        raise RentalAssistantError("E'lon filtri noto'g'ri aniqlandi.")
+
+    validated = {
+        "task": criteria["task"],
+        "kind": kind,
+        "city": city.strip() if city else None,
+        "listing_search": listing_search.strip() if listing_search else None,
+        "sort_by": criteria.get("sort_by", "recommended"),
+    }
+    if validated["sort_by"] not in {"recommended", "price_low", "price_high", "newest"}:
+        raise RentalAssistantError("Saralash turi noto'g'ri aniqlandi.")
+
+    for field in ("guests", "bedrooms"):
+        value = criteria.get(field)
+        if value is not None and (isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 20):
+            raise RentalAssistantError("Mehmonlar yoki xonalar soni noto'g'ri aniqlandi.")
+        validated[field] = value
+    for field in ("min_price", "max_price"):
+        value = criteria.get(field)
+        if value is None:
+            validated[field] = None
+            continue
+        try:
+            amount = Decimal(str(value))
+        except (InvalidOperation, ValueError) as exc:
+            raise RentalAssistantError("Narx filtri noto'g'ri aniqlandi.") from exc
+        if not amount.is_finite() or amount < 0 or amount > Decimal("1000000000000"):
+            raise RentalAssistantError("Narx filtri noto'g'ri aniqlandi.")
+        validated[field] = amount
+
+    days = criteria.get("rental_days")
+    if days is not None and (isinstance(days, bool) or not isinstance(days, int) or not 1 <= days <= 365):
+        raise RentalAssistantError("Ijara muddati 1–365 kun oralig'ida bo'lishi kerak.")
+    check_in, check_out = criteria.get("check_in"), criteria.get("check_out")
+    if check_in is not None or check_out is not None:
+        try:
+            start, end = date.fromisoformat(check_in), date.fromisoformat(check_out)
+        except (TypeError, ValueError) as exc:
+            raise RentalAssistantError("Ijara sanalari noto'g'ri aniqlandi.") from exc
+        if start < timezone.localdate() or end <= start or (end - start).days > 365:
+            raise RentalAssistantError("Ijara sanalari yaroqsiz.")
+        days = (end - start).days
+        validated["check_in"] = start
+        validated["check_out"] = end
+    else:
+        validated["check_in"] = None
+        validated["check_out"] = None
+    validated["rental_days"] = days
+    return validated
+
+
+def find_rentals(message):
+    criteria = _validated_criteria(_interpret_request(message))
+    if criteria is None:
+        return {
+            "message": "Men faqat ijara e'lonlarini filtrlash, narx bo'yicha saralash va ijara summasini hisoblashda yordam beraman.",
+            "results": [],
+        }
+
+    listings = RentalListing.objects.filter(is_active=True).prefetch_related("images")
+    if criteria["kind"]:
+        listings = listings.filter(kind=criteria["kind"])
+    if criteria["city"]:
+        listings = listings.filter(city__icontains=criteria["city"])
+    if criteria["guests"]:
+        listings = listings.filter(capacity__gte=criteria["guests"])
+    if criteria["bedrooms"]:
+        listings = listings.filter(kind=RentalListing.Kind.HOME, bedrooms__gte=criteria["bedrooms"])
+    if criteria["min_price"] is not None:
+        listings = listings.filter(price_per_day__gte=criteria["min_price"])
+    if criteria["max_price"] is not None:
+        listings = listings.filter(price_per_day__lte=criteria["max_price"])
+    if criteria["listing_search"]:
+        term = criteria["listing_search"]
+        listings = listings.filter(
+            Q(title__icontains=term)
+            | Q(title_ru__icontains=term)
+            | Q(title_en__icontains=term)
+            | Q(description__icontains=term)
+            | Q(description_ru__icontains=term)
+            | Q(description_en__icontains=term)
+            | Q(city__icontains=term)
+            | Q(brand__icontains=term)
+        )
+    if criteria["check_in"] and criteria["check_out"]:
+        unavailable_ids = Booking.objects.filter(
+            status__in=[Booking.Status.PENDING, Booking.Status.CONFIRMED],
+            check_in__lt=criteria["check_out"],
+            check_out__gt=criteria["check_in"],
+        ).values_list("listing_id", flat=True)
+        unavailable_order_ids = BookingOrder.objects.filter(
+            status__in=[BookingOrder.Status.PENDING, BookingOrder.Status.AWAITING_PAYMENT],
+            check_in__lt=criteria["check_out"],
+            check_out__gt=criteria["check_in"],
+        ).values_list("listing_id", flat=True)
+        listings = listings.exclude(pk__in=unavailable_ids).exclude(pk__in=unavailable_order_ids)
+
+    sort_order = {
+        "price_low": ("price_per_day", "-created_at"),
+        "price_high": ("-price_per_day", "-created_at"),
+        "newest": ("-created_at",),
+        "recommended": ("-is_featured", "-created_at"),
+    }[criteria["sort_by"]]
+    listings = listings.order_by(*sort_order)[:12]
+
+    results = []
+    for listing in listings:
+        result = {
+            "title": listing.title,
+            "title_ru": listing.title_ru,
+            "title_en": listing.title_en,
+            "city": listing.city,
+            "kind": listing.get_kind_display(),
+            "price_per_day": str(listing.price_per_day),
+            "image_url": listing.primary_image_url,
+            "url": reverse("listing-detail", args=[listing.slug]),
+        }
+        if criteria["rental_days"]:
+            result["rental_days"] = criteria["rental_days"]
+            result["total_price"] = str(listing.price_per_day * criteria["rental_days"])
+        results.append(result)
+
+    if results:
+        message_text = f"{len(results)} ta mos ijara varianti topildi."
+        if criteria["rental_days"]:
+            message_text += f" Jami narx {criteria['rental_days']} kun uchun hisoblandi."
+    else:
+        message_text = "Bu mezonlarga mos ijara varianti topilmadi. Filtrlarni o'zgartirib ko'ring."
+    return {"message": message_text, "results": results}

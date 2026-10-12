@@ -19,12 +19,19 @@ class carSerializer(serializers.ModelSerializer):
 
 class ListingSerializer(serializers.ModelSerializer):
     kind_label = serializers.CharField(source="get_kind_display", read_only=True)
+    image_url = serializers.CharField(source="primary_image_url", read_only=True)
+    images = serializers.SerializerMethodField()
+
+    def get_images(self, listing):
+        request = self.context.get("request")
+        urls = [image.image.url for image in listing.images.all()]
+        return [request.build_absolute_uri(url) for url in urls] if request else urls
 
     class Meta:
         model = RentalListing
         fields = [
             "id", "title", "title_ru", "title_en", "slug", "kind", "kind_label", "city", "address",
-            "description", "description_ru", "description_en", "price_per_day", "image_url", "capacity", "bedrooms", "bathrooms", "brand",
+            "description", "description_ru", "description_en", "price_per_day", "image_url", "images", "capacity", "bedrooms", "bathrooms", "brand",
             "transmission", "year", "is_featured",
         ]
 
@@ -32,7 +39,7 @@ class ListingSerializer(serializers.ModelSerializer):
 class BookingSerializer(serializers.ModelSerializer):
     listing_title = serializers.CharField(source="listing.title", read_only=True)
     listing_city = serializers.CharField(source="listing.city", read_only=True)
-    listing_image = serializers.CharField(source="listing.image_url", read_only=True)
+    listing_image = serializers.CharField(source="listing.primary_image_url", read_only=True)
     status = serializers.CharField(read_only=True)
     status_label = serializers.CharField(source="get_status_display", read_only=True)
     payment_method_label = serializers.CharField(source="get_payment_method_display", read_only=True)

@@ -29,7 +29,7 @@ class RentalListing(models.Model):
     description_ru = models.TextField("Описание (RU)", blank=True)
     description_en = models.TextField("Description (EN)", blank=True)
     price_per_day = models.DecimalField("Kunlik narx (so'm)", max_digits=12, decimal_places=2)
-    image_url = models.URLField("Rasm URL", max_length=600, blank=True)
+    legacy_image_url = models.URLField("Eski rasm URL", max_length=600, blank=True, db_column="image_url")
     capacity = models.PositiveSmallIntegerField("Sig'im", default=2, help_text="Uy uchun mehmonlar, mashina uchun o'rindiqlar.")
     bedrooms = models.PositiveSmallIntegerField("Yotoq xonalari", blank=True, null=True)
     bathrooms = models.PositiveSmallIntegerField("Hammomlar", blank=True, null=True)
@@ -69,8 +69,31 @@ class RentalListing(models.Model):
     def kind_label(self):
         return self.get_kind_display()
 
+    @property
+    def primary_image_url(self):
+        image = next(iter(self.images.all()), None)
+        return image.image.url if image else self.legacy_image_url
+
+    @property
+    def image_url(self):
+        return self.primary_image_url
+
     def __str__(self):
         return f"{self.title} — {self.city}"
+
+
+class ListingImage(models.Model):
+    listing = models.ForeignKey(RentalListing, on_delete=models.CASCADE, related_name="images")
+    image = models.ImageField("Rasm", upload_to="listing-images/%Y/%m/")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["id"]
+        verbose_name = "E'lon rasmi"
+        verbose_name_plural = "E'lon rasmlari"
+
+    def __str__(self):
+        return f"{self.listing.title} — rasm {self.pk or 'yangi'}"
 
 
 class Booking(models.Model):

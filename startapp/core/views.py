@@ -1,5 +1,7 @@
 from datetime import date
+import json
 
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
@@ -22,6 +24,7 @@ from .forms import BookingForm, RegistrationForm, homeForm, carForm
 from .models import Booking, BookingOrder, RentalListing, home, car
 from .payments import payment_url
 from .serializers import BookingSerializer, ListingSerializer, homeSerializer, carSerializer
+from .ai_assistant import RentalAssistantError, find_rentals
 
 
 
@@ -49,7 +52,7 @@ def _available_for_dates(queryset, check_in, check_out):
 
 
 def home(request):
-    listings = RentalListing.objects.filter(is_active=True)
+    listings = RentalListing.objects.filter(is_active=True).prefetch_related("images")
     kind = request.GET.get("kind", "")
     city = request.GET.get("city", "").strip()
     query = request.GET.get("q", "").strip()
@@ -86,6 +89,7 @@ def home(request):
         "today": timezone.localdate().isoformat(),
         "home_count": RentalListing.objects.filter(is_active=True, kind=RentalListing.Kind.HOME).count(),
         "car_count": RentalListing.objects.filter(is_active=True, kind=RentalListing.Kind.CAR).count(),
+        "ai_enabled": bool(getattr(settings, "OPENAI_API_KEY", "")),
     }
     return render(request, "core/home.html", context)
 
@@ -116,7 +120,7 @@ def register(request):
 
 
 def listing_detail(request, slug):
-    listing = get_object_or_404(RentalListing, slug=slug, is_active=True)
+    listing = get_object_or_404(RentalListing.objects.prefetch_related("images"), slug=slug, is_active=True)
     initial = {}
     for field in ("check_in", "check_out", "guests"):
         if request.GET.get(field):
@@ -172,7 +176,7 @@ def create_booking(request, slug):
 
 @login_required
 def my_bookings(request):
-    bookings = Booking.objects.filter(user=request.user).select_related("listing")
+    bookings = Booking.objects.filter(user=request.user).select_related("listing").prefetch_related("listing__images")
     booking_orders = BookingOrder.objects.filter(
         user=request.user,
         status__in=[
@@ -181,7 +185,7 @@ def my_bookings(request):
             BookingOrder.Status.REJECTED,
             BookingOrder.Status.CANCELLED,
         ],
-    ).select_related("listing")
+    ).select_related("listing").prefetch_related("listing__images")
     active_bookings_count = bookings.exclude(status=Booking.Status.CANCELLED).count()
     return render(request, "core/my_bookings.html", {
         "bookings": bookings,
@@ -238,10 +242,28 @@ def health(request):
     return JsonResponse({"status": "ok", "app": "Rentora", "time": timezone.now().isoformat()})
 
 
+@require_POST
+def ai_rental_search(request):
+    try:
+        payload = json.loads(request.body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JsonResponse({"detail": "So'rov JSON formatida bo'lishi kerak."}, status=400)
+    if not isinstance(payload, dict) or not isinstance(payload.get("message"), str):
+        return JsonResponse({"detail": "Qidiruv matni yuborilmadi."}, status=400)
+    message = payload["message"].strip()
+    if not message or len(message) > 500:
+        return JsonResponse({"detail": "So'rov 1–500 ta belgidan iborat bo'lishi kerak."}, status=400)
+    try:
+        result = find_rentals(message)
+    except RentalAssistantError as exc:
+        return JsonResponse({"detail": str(exc)}, status=exc.status_code)
+    return JsonResponse(result)
+
+
 @api_view(["GET"])
 @permission_classes([AllowAny])
 def listings_api(request):
-    listings = RentalListing.objects.filter(is_active=True)
+    listings = RentalListing.objects.filter(is_active=True).prefetch_related("images")
     kind = request.query_params.get("kind")
     city = request.query_params.get("city", "").strip()
     query = request.query_params.get("q", "").strip()
@@ -260,7 +282,7 @@ def listings_api(request):
 @api_view(["GET"])
 @permission_classes([AllowAny])
 def listing_detail_api(request, listing_id):
-    listing = get_object_or_404(RentalListing, pk=listing_id, is_active=True)
+    listing = get_object_or_404(RentalListing.objects.prefetch_related("images"), pk=listing_id, is_active=True)
     return Response(ListingSerializer(listing).data)
 
 
@@ -268,8 +290,8 @@ def listing_detail_api(request, listing_id):
 @permission_classes([IsAuthenticated])
 def bookings_api(request):
     if request.method == "GET":
-        bookings = Booking.objects.filter(user=request.user).select_related("listing")
-        orders = BookingOrder.objects.filter(user=request.user).select_related("listing")
+        bookings = Booking.objects.filter(user=request.user).select_related("listing").prefetch_related("listing__images")
+        orders = BookingOrder.objects.filter(user=request.user).select_related("listing").prefetch_related("listing__images")
         entries = sorted([*bookings, *orders], key=lambda entry: entry.created_at, reverse=True)
         return Response(BookingSerializer(entries, many=True).data)
     serializer = BookingSerializer(data=request.data, context={"request": request})

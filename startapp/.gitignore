@@ -4,6 +4,7 @@ __pycache__/
 *.py[cod]
 *.sqlite3
 staticfiles/
+media/
 .env
 .coverage
 htmlcov/

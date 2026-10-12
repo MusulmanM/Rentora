@@ -15,6 +15,8 @@ Interfeys o'zbek (`UZ`), rus (`RU`) va ingliz (`EN`) tillarida mavjud. Yuqori qi
 - Bron va buyurtmalarni bekor qilish; kutilayotgan buyurtmalar sanalarni boshqa mijozlardan vaqtincha band qiladi.
 - Bron holatlari: kutilmoqda, tasdiqlangan yoki bekor qilingan.
 - Django admin orqali e'lonlar, bronlar va to'lov yozuvlarini ko'rish hamda nom va tavsiflarning ruscha/inglizcha versiyalarini saqlash.
+- E'lon yaratishda admin paneldan 10 tagacha oddiy rasm faylini yuklash va galereyada ko'rsatish.
+- Rentora AI tabiiy tildagi ijara so'rovlarini filtrlash, saralash va muddat bo'yicha ijara narxini hisoblash bilan cheklanadi.
 - JSON REST API va `/health/` health endpoint.
 - Telefon, planshet va desktop ekranlariga mos dizayn.
 - Demo uchun 8 ta uy/avtomobil e'lonini yaratadigan seed buyrug'i.
@@ -56,6 +58,19 @@ python manage.py runserver
 ```
 
 Ixtiyoriy ravishda `.env.example` faylidan `.env` nusxa oling va qiymatlarni o'zgartiring.
+
+### Rentora AI va e'lon rasmlari
+
+AI yordamchini yoqish uchun OpenAI API kalitini `.env` fayliga kiriting:
+
+```dotenv
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-4o-mini
+```
+
+AI faqat ijara e'lonlarini filtrlash/saralash va narxdan muddat bo'yicha jami summani hisoblashga mo'ljallangan. So'rov matni mezonlarni aniqlash uchun OpenAI API'ga yuboriladi; ijara narxi serverda bazadagi narx asosida hisoblanadi. Kalitni repoga qo'shmang.
+
+Yangi e'lon qo'shishda admin paneldagi "E'lon rasmlari" bo'limidan 10 tagacha rasm faylini yuklang (har biri 10 MB gacha). Mahalliy ishlab chiqishda rasmlar `startapp/media/` ichida saqlanadi. Production'da `MEDIA_ROOT` uchun doimiy disk yoki Django storage-compatible object storage sozlang.
 
 ### Onlayn to'lov
 
