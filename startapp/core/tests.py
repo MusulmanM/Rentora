@@ -65,6 +65,28 @@ class WebsiteTests(StartAppBaseTest):
         self.assertContains(response, '<option value="en">EN</option>', html=True)
         self.assertContains(response, 'core/i18n.js')
 
+    @override_settings(OPENAI_API_KEY="")
+    def test_ai_chat_is_sitewide_and_explains_disabled_configuration(self):
+        for path in (
+            reverse("home"),
+            reverse("listing-detail", args=[self.home.slug]),
+        ):
+            response = self.client.get(path)
+            self.assertEqual(response.status_code, 200)
+            self.assertContains(response, 'data-ai-widget data-enabled="false"')
+            self.assertContains(response, "AI yordamchi hozircha ishlamaydi")
+            self.assertContains(response, "OPENAI_API_KEY")
+        self.assertNotContains(self.client.get(reverse("home")), "data-ai-search")
+
+    @override_settings(OPENAI_API_KEY="test-openai-key")
+    def test_enabled_ai_chat_posts_to_existing_rental_endpoint(self):
+        response = self.client.get(reverse("home"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-ai-widget data-enabled="true"')
+        self.assertContains(response, f'action="{reverse("ai-rental-search")}"')
+        self.assertContains(response, 'data-ai-conversation role="log"')
+        self.assertContains(response, 'name="message"')
+
     def test_home_filter_by_kind(self):
         response = self.client.get(reverse("home"), {"kind": "car"})
         self.assertEqual(response.status_code, 200)
@@ -171,6 +193,26 @@ class WebsiteTests(StartAppBaseTest):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Avval Telegram botga kirib")
         self.assertFalse(User.objects.filter(username="aziz-123").exists())
+
+    @override_settings(TELEGRAM_BOT_USERNAME="rentora_example_bot")
+    def test_registration_explains_telegram_contact_and_links_configured_bot(self):
+        response = self.client.get(reverse("register"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Avval Telegram botga ulaning")
+        self.assertContains(response, "Start")
+        self.assertContains(response, "o'z kontaktingizni ulashing")
+        self.assertContains(response, 'href="https://t.me/rentora_example_bot"')
+        self.assertLess(
+            response.content.index(b"Avval Telegram botga ulaning"),
+            response.content.index(b'name="phone_number"'),
+        )
+
+    @override_settings(TELEGRAM_BOT_USERNAME="")
+    def test_registration_explains_missing_telegram_bot_link(self):
+        response = self.client.get(reverse("register"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Bot havolasi hozircha mavjud emas")
+        self.assertNotContains(response, "href=\"https://t.me/")
 
 
 class ListingImageTests(StartAppBaseTest):

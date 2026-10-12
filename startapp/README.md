@@ -104,7 +104,7 @@ OPENAI_API_KEY=
 OPENAI_MODEL=gpt-4o-mini
 ```
 
-AI faqat ijara e'lonlarini filtrlash/saralash va narxdan muddat bo'yicha jami summani hisoblashga mo'ljallangan. So'rov matni mezonlarni aniqlash uchun OpenAI API'ga yuboriladi; ijara narxi serverda bazadagi narx asosida hisoblanadi. Kalitni repoga qo'shmang.
+AI barcha sahifalarda past-o'ng burchakdagi suzuvchi chat orqali ochiladi va faqat ijara e'lonlarini filtrlash/saralash hamda narxdan muddat bo'yicha jami summani hisoblashga mo'ljallangan. Suhbat xabarlari va mos e'lonlar chat oynasida ko'rsatiladi; Enter xabarni yuboradi. So'rov matni mezonlarni aniqlash uchun OpenAI API'ga yuboriladi; ijara narxi serverda bazadagi narx asosida hisoblanadi. `OPENAI_API_KEY` bo'lmasa, chat sozlanmagan holatini va ma'mur uchun konfiguratsiya ko'rsatmasini ko'rsatadi. Kalitni repoga qo'shmang.
 
 Admin yangi e'lonida yoki ijara beruvchi kabinetida 10 tagacha haqiqiy rasm faylini yuklang (har biri 10 MB gacha). E'lon sahifasidagi asosiy rasm yoki kichik rasmlarni bosib, klaviaturadagi chap/o'ng tugmalarda galereyani ko'ring. Admin paneldagi rasm preview'ini bosib faylni alohida ochish mumkin. Mahalliy ishlab chiqishda rasmlar `startapp/media/` ichida saqlanadi. Production'da `MEDIA_ROOT` uchun doimiy disk yoki Django storage-compatible object storage sozlang.
 
