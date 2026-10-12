@@ -4,7 +4,7 @@ from django.contrib.auth.forms import UserCreationForm
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 
-from .models import Booking, RentalListing, home, car
+from .models import Booking, BookingOrder, RentalListing, home, car
 
 User = get_user_model()
 
@@ -83,6 +83,13 @@ class BookingForm(forms.ModelForm):
             )
             if conflicts.exists():
                 self.add_error("check_in", "Bu e'lon tanlangan sanalarda band. Boshqa sanalarni kiriting.")
+            if BookingOrder.objects.filter(
+                listing=self.listing,
+                status__in=[BookingOrder.Status.PENDING, BookingOrder.Status.AWAITING_PAYMENT],
+                check_in__lt=end,
+                check_out__gt=start,
+            ).exists():
+                self.add_error("check_in", "Bu e'lon tanlangan sanalarda boshqa buyurtma uchun band.")
         return cleaned
 
 

@@ -1,13 +1,15 @@
 from datetime import timedelta
 from decimal import Decimal
+import hashlib
+import json
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from .models import Booking, RentalListing
+from .models import Booking, BookingOrder, RentalListing
 
 User = get_user_model()
 
@@ -89,13 +91,153 @@ class BookingTests(StartAppBaseTest):
     def test_user_can_create_booking_and_total_is_calculated(self):
         self.client.login(username="demo-user", password="SafePass123!")
         response = self.client.post(reverse("create-booking", args=[self.home.slug]), {
-            "check_in": self.tomorrow.isoformat(), "check_out": self.day_after.isoformat(), "guests": 2, "payment_method": "card",
+            "check_in": self.tomorrow.isoformat(), "check_out": self.day_after.isoformat(), "guests": 2, "payment_method": "cash",
         })
         self.assertRedirects(response, reverse("my-bookings"))
         booking = Booking.objects.get(user=self.user, listing=self.home)
         self.assertEqual(booking.total_price, Decimal("500000"))
         self.assertEqual(booking.days, 2)
-        self.assertEqual(booking.payment_method, Booking.PaymentMethod.CARD)
+        self.assertEqual(booking.payment_method, Booking.PaymentMethod.CASH)
+        self.assertEqual(BookingOrder.objects.count(), 0)
+
+    def test_online_booking_waits_for_admin_acceptance_and_payment(self):
+        self.client.force_login(self.user)
+        response = self.client.post(reverse("create-booking", args=[self.home.slug]), {
+            "check_in": self.tomorrow.isoformat(), "check_out": self.day_after.isoformat(),
+            "guests": 2, "payment_method": "click",
+        })
+        self.assertRedirects(response, reverse("my-bookings"))
+        order = BookingOrder.objects.get(user=self.user, listing=self.home)
+        self.assertEqual(order.status, BookingOrder.Status.PENDING)
+        self.assertEqual(order.total_price, Decimal("500000"))
+        self.assertEqual(Booking.objects.count(), 0)
+        self.assertContains(self.client.get(reverse("my-bookings")), "Qabul qilinishi kutilmoqda")
+        response = self.client.get(reverse("home"), {
+            "kind": "home",
+            "check_in": self.tomorrow.isoformat(),
+            "check_out": self.day_after.isoformat(),
+        })
+        self.assertNotContains(response, "Test apartment")
+
+    def test_admin_accepts_online_order_before_payment_is_available(self):
+        order = BookingOrder.objects.create(
+            user=self.user, listing=self.home, check_in=self.tomorrow,
+            check_out=self.day_after, guests=2, payment_method=Booking.PaymentMethod.PAYME,
+        )
+        admin_user = User.objects.create_superuser(
+            username="site-admin", email="admin@example.com", password="admin-test-password-123",
+        )
+        self.client.force_login(admin_user)
+        response = self.client.post(reverse("admin:core_bookingorder_changelist"), {
+            "action": "accept_orders",
+            "_selected_action": [str(order.pk)],
+        })
+        self.assertEqual(response.status_code, 302)
+        order.refresh_from_db()
+        self.assertEqual(order.status, BookingOrder.Status.AWAITING_PAYMENT)
+        self.assertEqual(Booking.objects.count(), 0)
+
+    def test_online_payment_redirect_requires_admin_acceptance(self):
+        order = BookingOrder.objects.create(
+            user=self.user, listing=self.home, check_in=self.tomorrow,
+            check_out=self.day_after, guests=2, payment_method=Booking.PaymentMethod.CLICK,
+        )
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("pay-booking-order", args=[order.pk]))
+        self.assertRedirects(response, reverse("my-bookings"))
+        self.assertEqual(Booking.objects.count(), 0)
+
+    @override_settings(
+        CLICK_SERVICE_ID="service-test",
+        CLICK_MERCHANT_ID="merchant-test",
+        CLICK_SECRET_KEY="secret-test",
+        CLICK_CHECKOUT_BASE_URL="https://my.click.uz/services/pay",
+    )
+    def test_accepted_online_order_redirects_to_click_without_creating_booking(self):
+        order = BookingOrder.objects.create(
+            user=self.user, listing=self.home, check_in=self.tomorrow,
+            check_out=self.day_after, guests=2, payment_method=Booking.PaymentMethod.CARD,
+            status=BookingOrder.Status.AWAITING_PAYMENT,
+        )
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("pay-booking-order", args=[order.pk]))
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("service_id=service-test", response.url)
+        self.assertIn(str(order.reference), response.url)
+        self.assertEqual(Booking.objects.count(), 0)
+
+    @override_settings(CLICK_SERVICE_ID="123", CLICK_SECRET_KEY="secret")
+    def test_click_callbacks_create_booking_only_after_successful_payment(self):
+        order = BookingOrder.objects.create(
+            user=self.user, listing=self.home, check_in=self.tomorrow,
+            check_out=self.day_after, guests=2, payment_method=Booking.PaymentMethod.CLICK,
+            status=BookingOrder.Status.AWAITING_PAYMENT,
+        )
+        payload = {
+            "click_trans_id": "click-transaction-1",
+            "service_id": "123",
+            "merchant_trans_id": str(order.reference),
+            "amount": "500000",
+            "action": "0",
+            "sign_time": "2026-10-12 12:00:00",
+        }
+        payload["sign_string"] = hashlib.md5(
+            f"{payload['click_trans_id']}{payload['service_id']}secret"
+            f"{payload['merchant_trans_id']}{payload['amount']}{payload['action']}{payload['sign_time']}".encode()
+        ).hexdigest()
+        prepare = self.client.post(reverse("click-payment-callback"), payload)
+        self.assertEqual(prepare.json()["error"], 0)
+        self.assertEqual(Booking.objects.count(), 0)
+
+        self.home.price_per_day = Decimal("400000")
+        self.home.save(update_fields=["price_per_day"])
+        payload.update({
+            "action": "1",
+            "merchant_prepare_id": prepare.json()["merchant_prepare_id"],
+            "error": "0",
+        })
+        payload["sign_string"] = hashlib.md5(
+            f"{payload['click_trans_id']}{payload['service_id']}secret"
+            f"{payload['merchant_trans_id']}{payload['amount']}{payload['action']}{payload['sign_time']}".encode()
+        ).hexdigest()
+        complete = self.client.post(reverse("click-payment-callback"), payload)
+        self.assertEqual(complete.json()["error"], 0)
+        self.assertEqual(Booking.objects.count(), 1)
+        order.refresh_from_db()
+        self.assertEqual(order.status, BookingOrder.Status.PAID)
+        self.assertEqual(order.booking.payment_method, Booking.PaymentMethod.CLICK)
+        self.assertEqual(order.booking.total_price, Decimal("500000"))
+
+    @override_settings(PAYME_MERCHANT_AUTHORIZATION="Basic test-key")
+    def test_payme_callback_creates_booking_on_performed_transaction(self):
+        order = BookingOrder.objects.create(
+            user=self.user, listing=self.home, check_in=self.tomorrow,
+            check_out=self.day_after, guests=2, payment_method=Booking.PaymentMethod.PAYME,
+            status=BookingOrder.Status.AWAITING_PAYMENT,
+        )
+
+        def callback(method, params):
+            return self.client.post(
+                reverse("payme-payment-callback"),
+                data=json.dumps({"id": 1, "method": method, "params": params}),
+                content_type="application/json",
+                HTTP_AUTHORIZATION="Basic test-key",
+            )
+
+        created = callback("CreateTransaction", {
+            "id": "payme-transaction-1",
+            "time": 1791806400000,
+            "amount": 50000000,
+            "account": {"order_id": str(order.reference)},
+        })
+        self.assertEqual(created.json()["result"]["state"], 1)
+        self.assertEqual(Booking.objects.count(), 0)
+        performed = callback("PerformTransaction", {"id": "payme-transaction-1"})
+        self.assertEqual(performed.json()["result"]["state"], 2)
+        self.assertEqual(Booking.objects.count(), 1)
+        order.refresh_from_db()
+        self.assertEqual(order.status, BookingOrder.Status.PAID)
+        self.assertEqual(order.booking.payment_method, Booking.PaymentMethod.PAYME)
 
     def test_overlapping_booking_is_rejected(self):
         Booking.objects.create(
@@ -176,15 +318,29 @@ class ApiTests(StartAppBaseTest):
         }, format="json")
         self.assertEqual(response.status_code, 403)
 
-    def test_authenticated_booking_api_creates_booking(self):
+    def test_authenticated_online_booking_api_creates_pending_order(self):
         self.api.force_authenticate(user=self.user)
         response = self.api.post(reverse("api-bookings"), {
             "listing": self.home.pk, "check_in": self.tomorrow.isoformat(),
             "check_out": self.day_after.isoformat(), "guests": 2, "payment_method": "click",
         }, format="json")
-        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.status_code, 202, response.data)
         self.assertEqual(Decimal(response.data["total_price"]), Decimal("500000.00"))
         self.assertEqual(response.data["payment_method"], "click")
+        self.assertEqual(Booking.objects.count(), 0)
+        self.assertEqual(BookingOrder.objects.get().status, BookingOrder.Status.PENDING)
+
+    def test_bookings_api_serializes_online_order_statuses(self):
+        order = BookingOrder.objects.create(
+            user=self.user, listing=self.home, check_in=self.tomorrow,
+            check_out=self.day_after, guests=2, payment_method=Booking.PaymentMethod.CLICK,
+            status=BookingOrder.Status.AWAITING_PAYMENT,
+        )
+        self.api.force_authenticate(user=self.user)
+        response = self.api.get(reverse("api-bookings"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data[0]["id"], order.pk)
+        self.assertEqual(response.data[0]["status"], BookingOrder.Status.AWAITING_PAYMENT)
 
     def test_booking_api_does_not_accept_inactive_listing(self):
         self.home.is_active = False

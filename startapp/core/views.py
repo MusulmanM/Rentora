@@ -19,7 +19,8 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 from .forms import BookingForm, RegistrationForm, homeForm, carForm
-from .models import Booking, RentalListing, home, car
+from .models import Booking, BookingOrder, RentalListing, home, car
+from .payments import payment_url
 from .serializers import BookingSerializer, ListingSerializer, homeSerializer, carSerializer
 
 
@@ -38,7 +39,12 @@ def _available_for_dates(queryset, check_in, check_out):
             check_in__lt=check_out,
             check_out__gt=check_in,
         ).values_list("listing_id", flat=True)
-        return queryset.exclude(id__in=unavailable_ids)
+        unavailable_order_ids = BookingOrder.objects.filter(
+            status__in=[BookingOrder.Status.PENDING, BookingOrder.Status.AWAITING_PAYMENT],
+            check_in__lt=check_out,
+            check_out__gt=check_in,
+        ).values_list("listing_id", flat=True)
+        return queryset.exclude(id__in=unavailable_ids).exclude(id__in=unavailable_order_ids)
     return queryset
 
 
@@ -132,12 +138,27 @@ def create_booking(request, slug):
                 if locked_listing is None:
                     messages.error(request, "Bu e'lon hozir faol emas.")
                     return redirect("home")
-                booking = form.save(commit=False)
-                booking.user = request.user
-                booking.listing = locked_listing
-                booking.full_clean()
-                booking.save()
-            messages.success(request, "Bron muvaffaqiyatli yaratildi! Bron holati: kutilmoqda.")
+                if form.cleaned_data["payment_method"] == Booking.PaymentMethod.CASH:
+                    booking = form.save(commit=False)
+                    booking.user = request.user
+                    booking.listing = locked_listing
+                    booking.full_clean()
+                    booking.save()
+                    messages.success(request, "Buyurtma qabul qilindi. Naqd to'lovni xizmatni olganingizda amalga oshirasiz.")
+                else:
+                    order = BookingOrder(
+                        user=request.user,
+                        listing=locked_listing,
+                        check_in=form.cleaned_data["check_in"],
+                        check_out=form.cleaned_data["check_out"],
+                        guests=form.cleaned_data["guests"],
+                        payment_method=form.cleaned_data["payment_method"],
+                    )
+                    order.full_clean()
+                    order.save()
+            if form.cleaned_data["payment_method"] == Booking.PaymentMethod.CASH:
+                return redirect("my-bookings")
+            messages.success(request, "Buyurtmangiz yuborildi. To'lov admin yoki mezbon buyurtmani qabul qilganidan keyin ochiladi.")
             return redirect("my-bookings")
         except ValidationError as exc:
             if hasattr(exc, "message_dict"):
@@ -152,8 +173,51 @@ def create_booking(request, slug):
 @login_required
 def my_bookings(request):
     bookings = Booking.objects.filter(user=request.user).select_related("listing")
+    booking_orders = BookingOrder.objects.filter(
+        user=request.user,
+        status__in=[
+            BookingOrder.Status.PENDING,
+            BookingOrder.Status.AWAITING_PAYMENT,
+            BookingOrder.Status.REJECTED,
+            BookingOrder.Status.CANCELLED,
+        ],
+    ).select_related("listing")
     active_bookings_count = bookings.exclude(status=Booking.Status.CANCELLED).count()
-    return render(request, "core/my_bookings.html", {"bookings": bookings, "active_bookings_count": active_bookings_count})
+    return render(request, "core/my_bookings.html", {
+        "bookings": bookings,
+        "booking_orders": booking_orders,
+        "active_bookings_count": active_bookings_count,
+    })
+
+
+@login_required
+def pay_booking_order(request, order_id):
+    order = get_object_or_404(BookingOrder, pk=order_id, user=request.user)
+    if order.status != BookingOrder.Status.AWAITING_PAYMENT:
+        messages.error(request, "Buyurtma hali to'lov uchun qabul qilinmagan yoki endi faol emas.")
+        return redirect("my-bookings")
+    try:
+        return redirect(payment_url(order, request))
+    except ValueError as exc:
+        messages.error(request, str(exc))
+        return redirect("my-bookings")
+
+
+@login_required
+@require_POST
+def cancel_booking_order(request, order_id):
+    order = get_object_or_404(BookingOrder, pk=order_id, user=request.user)
+    can_cancel = order.status == BookingOrder.Status.PENDING or (
+        order.status == BookingOrder.Status.AWAITING_PAYMENT
+        and not order.payments.filter(state=1).exists()
+    )
+    if can_cancel:
+        order.status = BookingOrder.Status.CANCELLED
+        order.save(update_fields=["status"])
+        messages.success(request, "Buyurtma bekor qilindi.")
+    else:
+        messages.info(request, "Bu buyurtmani bekor qilib bo'lmaydi.")
+    return redirect("my-bookings")
 
 
 @login_required
@@ -205,11 +269,14 @@ def listing_detail_api(request, listing_id):
 def bookings_api(request):
     if request.method == "GET":
         bookings = Booking.objects.filter(user=request.user).select_related("listing")
-        return Response(BookingSerializer(bookings, many=True).data)
+        orders = BookingOrder.objects.filter(user=request.user).select_related("listing")
+        entries = sorted([*bookings, *orders], key=lambda entry: entry.created_at, reverse=True)
+        return Response(BookingSerializer(entries, many=True).data)
     serializer = BookingSerializer(data=request.data, context={"request": request})
     if serializer.is_valid():
         booking = serializer.save()
-        return Response(BookingSerializer(booking).data, status=status.HTTP_201_CREATED)
+        response_status = status.HTTP_202_ACCEPTED if isinstance(booking, BookingOrder) else status.HTTP_201_CREATED
+        return Response(BookingSerializer(booking).data, status=response_status)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 

@@ -10,14 +10,16 @@ Interfeys o'zbek (`UZ`), rus (`RU`) va ingliz (`EN`) tillarida mavjud. Yuqori qi
 - Uy va avtomobillar katalogi: shahar, turi, mehmon/yo'lovchi soni va sanalar bo'yicha qidiruv.
 - E'lon tafsilotlari, kunlik narx va sanalarga qarab jami summani avtomatik hisoblash.
 - Ro'yxatdan o'tish, tizimga kirish va shaxsiy bronlar sahifasi.
-- Bron yaratish va bekor qilish; bir e'lon uchun ustma-ust sanalarga bron qo'yish cheklovi.
+- Naqd bronni darhol saqlash; Click/karta yoki Payme buyurtmalarini admin qabul qilgach to'liq onlayn to'lovga chiqarish.
+- Provayder to'lovi tasdiqlanmaguncha bron yozilmaydi; muvaffaqiyatli callback bronni tasdiqlaydi va sanalarni band qiladi.
+- Bron va buyurtmalarni bekor qilish; kutilayotgan buyurtmalar sanalarni boshqa mijozlardan vaqtincha band qiladi.
 - Bron holatlari: kutilmoqda, tasdiqlangan yoki bekor qilingan.
-- Django admin orqali e'lonlar va bronlarni boshqarish, nom va tavsiflarning ruscha/inglizcha versiyalarini saqlash.
+- Django admin orqali e'lonlar va bronlarni boshqarish, onlayn buyurtmalarni qabul qilish/rad etish va nom hamda tavsiflarning ruscha/inglizcha versiyalarini saqlash.
 - JSON REST API va `/health/` health endpoint.
 - Telefon, planshet va desktop ekranlariga mos dizayn.
 - Demo uchun 8 ta uy/avtomobil e'lonini yaratadigan seed buyrug'i.
 
-> Demo versiyada onlayn to'lov, SMS tasdiqlash, xarita API va real vaqt bildirishnomalari ulanmagan. Bron ma'lumotlar bazasida saqlanadi va boshlang'ich holati `Pending` (kutilmoqda); admin paneldan tasdiqlash mumkin. Namuna rasmlari internet orqali yuklanadi.
+> Click va Payme merchant API oqimlari tayyor; haqiqiy to'lovlar uchun merchant hisoblari, callback URL'lari va maxfiy environment sozlamalari talab qilinadi. SMS tasdiqlash, xarita API va real vaqt bildirishnomalari ulanmagan. Namuna rasmlari internet orqali yuklanadi.
 
 ## Talablar
 
@@ -55,6 +57,22 @@ python manage.py runserver
 
 Ixtiyoriy ravishda `.env.example` faylidan `.env` nusxa oling va qiymatlarni o'zgartiring.
 
+### Onlayn to'lov
+
+Click merchant kabinetida callback URL sifatida `https://<sayt-domeni>/payments/click/callback/` manzilini sozlang. Payme Business Merchant API URL'i `https://<sayt-domeni>/payments/payme/callback/` bo'ladi. Merchant ma'lumotlarini `.env` fayliga yoki hosting environment'iga kiriting; secret'larni repoga qo'shmang:
+
+```dotenv
+CLICK_SERVICE_ID=
+CLICK_MERCHANT_ID=
+CLICK_SECRET_KEY=
+PAYME_MERCHANT_ID=
+PAYME_MERCHANT_KEY=
+```
+
+Buyurtmalar admin panelda `To'lov kutilmoqda` holatiga qabul qilingandan keyin mijoz to'liq summani to'laydi. Django faqat provayder imzosi va muvaffaqiyatli callback tekshirilgach `Booking` yozuvini yaratadi. Karta va Click tanlovlari Click checkout'iga, Payme tanlovi Payme Business checkout'iga yo'naltiriladi. Test/sandbox uchun provider bergan test checkout URL va merchant credential'larini `CLICK_CHECKOUT_BASE_URL` hamda `PAYME_CHECKOUT_BASE_URL` orqali belgilang. Callback'lar ommaviy internetdan HTTPS orqali ochiq bo'lishi kerak.
+
+Integratsiya protokollari: [Click hujjatlari](https://docs.click.uz/) va [Payme Business Merchant API](https://developer.help.paycom.uz/).
+
 ## Testlar
 
 Kutubxonalarni o'rnatgandan so'ng:
@@ -63,7 +81,7 @@ Kutubxonalarni o'rnatgandan so'ng:
 python manage.py test core
 ```
 
-Testlar bosh sahifa va til tanlagichni, filtrlarni, ro'yxatdan o'tishni, bron summasini, sanalar to'qnashuvini, bekor qilish huquqlarini va API ruxsatlarini tekshiradi. Kod sintaksisi va frontend skriptlari uchun statik tekshiruv ham qo'shilgan. Joriy build muhitida Django o'rnatilmagan va paket indeksiga ulanish cheklangan; shuning uchun Django integratsion testlari bu yerda ishga tushmagan. Tafsilotlar `TEST_REPORT.md` faylida.
+Testlar bosh sahifa va til tanlagichni, filtrlarni, ro'yxatdan o'tishni, naqd bron, online buyurtma-tasdiqlash oqimi, Click/Payme callback'lari, sanalar to'qnashuvi, bekor qilish huquqlari va API ruxsatlarini tekshiradi. Python va frontend skriptlari sintaksisi ham alohida tekshiriladi. Tafsilotlar `TEST_REPORT.md` faylida.
 
 ## API yo'llari
 
