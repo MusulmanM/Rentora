@@ -17,6 +17,7 @@ urlpatterns = [
     path("payments/click/callback/", click_callback, name="click-payment-callback"),
     path("payments/payme/callback/", payme_callback, name="payme-payment-callback"),
     path("health/", views.health, name="health"),
+    path("api/ai/rentals/", views.ai_rental_search, name="ai-rental-search"),
     path("api/listings/", views.listings_api, name="api-listings"),
     path("api/listings/<int:listing_id>/", views.listing_detail_api, name="api-listing-detail"),
     path("api/bookings/", views.bookings_api, name="api-bookings"),

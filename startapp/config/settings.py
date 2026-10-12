@@ -30,6 +30,8 @@ PAYME_MERCHANT_AUTHORIZATION = (
     if PAYME_MERCHANT_KEY else ""
 )
 PAYME_CHECKOUT_BASE_URL = os.environ.get("PAYME_CHECKOUT_BASE_URL", "https://checkout.paycom.uz")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -91,6 +93,8 @@ USE_TZ = True
 
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 LOGIN_URL = "login"

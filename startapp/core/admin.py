@@ -1,17 +1,59 @@
+from django import forms
 from django.contrib import admin
+from django.core.exceptions import ValidationError
+from django.forms.models import BaseInlineFormSet
 
-from .models import Booking, BookingOrder, PaymentTransaction, RentalListing, home, car
+from .models import Booking, BookingOrder, ListingImage, PaymentTransaction, RentalListing, home, car
+
+
+class ListingImageInlineFormSet(BaseInlineFormSet):
+    def clean(self):
+        super().clean()
+        if any(self.errors):
+            return
+        image_count = sum(
+            1 for form in self.forms
+            if form.cleaned_data
+            and not form.cleaned_data.get("DELETE", False)
+            and (form.cleaned_data.get("image") or form.instance.pk)
+        )
+        if image_count > 10:
+            raise ValidationError("Har bir e'lon uchun eng ko'p 10 ta rasm yuklash mumkin.")
+
+
+class ListingImageForm(forms.ModelForm):
+    class Meta:
+        model = ListingImage
+        fields = ("image",)
+
+    def clean_image(self):
+        image = self.cleaned_data.get("image")
+        if image and not getattr(image, "_committed", False) and image.size > 10 * 1024 * 1024:
+            raise ValidationError("Har bir rasm hajmi 10 MB dan oshmasligi kerak.")
+        return image
+
+
+class ListingImageInline(admin.TabularInline):
+    model = ListingImage
+    form = ListingImageForm
+    formset = ListingImageInlineFormSet
+    extra = 1
+    max_num = 10
+    fields = ("image",)
+    verbose_name = "Rasm (10 tagacha)"
+    verbose_name_plural = "E'lon rasmlari (10 tagacha)"
 
 
 @admin.register(RentalListing)
 class RentalListingAdmin(admin.ModelAdmin):
+    inlines = (ListingImageInline,)
     list_display = ("title", "kind", "city", "price_per_day", "is_featured", "is_active")
     list_filter = ("kind", "city", "is_featured", "is_active")
     search_fields = ("title", "title_ru", "title_en", "city", "address", "description", "description_ru", "description_en", "brand")
     fieldsets = (
         ("E'lon (o'zbekcha)", {"fields": ("kind", "title", "city", "address", "description")} ),
         ("Translations / Tarjimalar", {"fields": ("title_ru", "description_ru", "title_en", "description_en"), "classes": ("collapse",)}),
-        ("Ijara shartlari", {"fields": ("price_per_day", "capacity", "bedrooms", "bathrooms", "brand", "transmission", "year", "image_url")} ),
+        ("Ijara shartlari", {"fields": ("price_per_day", "capacity", "bedrooms", "bathrooms", "brand", "transmission", "year")} ),
         ("Holat", {"fields": ("slug", "is_featured", "is_active")} ),
     )
     list_editable = ("is_featured", "is_active")

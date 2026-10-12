@@ -1,15 +1,22 @@
 from datetime import timedelta
 from decimal import Decimal
 import hashlib
+from io import BytesIO
 import json
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.forms.models import inlineformset_factory
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
+from PIL import Image
 from rest_framework.test import APIClient
 
-from .models import Booking, BookingOrder, RentalListing
+from .admin import ListingImageForm, ListingImageInlineFormSet
+from .models import Booking, BookingOrder, ListingImage, RentalListing
 
 User = get_user_model()
 
@@ -69,6 +76,63 @@ class WebsiteTests(StartAppBaseTest):
         self.assertEqual(response.json()["status"], "ok")
         self.assertEqual(response.json()["app"], "Rentora")
 
+    @patch("core.ai_assistant._interpret_request")
+    def test_ai_rental_search_filters_sorts_and_calculates_from_listing_price(self, interpret):
+        interpret.return_value = {
+            "task": "search_and_calculate",
+            "kind": "home",
+            "city": "Toshkent",
+            "guests": 4,
+            "bedrooms": None,
+            "min_price": None,
+            "max_price": 300000,
+            "listing_search": None,
+            "sort_by": "price_low",
+            "rental_days": 3,
+            "check_in": None,
+            "check_out": None,
+        }
+        response = self.client.post(
+            reverse("ai-rental-search"),
+            data=json.dumps({"message": "Toshkentda 4 kishilik uy, 3 kun, arzonroq"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(len(data["results"]), 1)
+        self.assertEqual(data["results"][0]["title"], "Test apartment")
+        self.assertEqual(data["results"][0]["total_price"], "750000.00")
+        interpret.assert_called_once()
+
+    def test_ai_rental_search_rejects_requests_outside_its_scope(self):
+        with patch("core.ai_assistant._interpret_request", return_value={"task": "out_of_scope"}):
+            response = self.client.post(
+                reverse("ai-rental-search"),
+                data=json.dumps({"message": "Tell me a joke"}),
+                content_type="application/json",
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["results"], [])
+        self.assertIn("faqat", response.json()["message"])
+
+    @override_settings(OPENAI_API_KEY="")
+    def test_ai_rental_search_reports_missing_api_key(self):
+        response = self.client.post(
+            reverse("ai-rental-search"),
+            data=json.dumps({"message": "Toshkentda uy top"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("OPENAI_API_KEY", response.json()["detail"])
+
+    def test_ai_rental_search_rejects_oversized_prompts(self):
+        response = self.client.post(
+            reverse("ai-rental-search"),
+            data=json.dumps({"message": "uy " * 200}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+
     def test_registration_creates_user_and_logs_in(self):
         response = self.client.post(reverse("register"), {
             "first_name": "Aziz", "username": "aziz-123", "email": "aziz@example.com",
@@ -77,6 +141,62 @@ class WebsiteTests(StartAppBaseTest):
         self.assertRedirects(response, reverse("home"))
         self.assertTrue(User.objects.filter(username="aziz-123").exists())
         self.assertIn("_auth_user_id", self.client.session)
+
+
+class ListingImageTests(StartAppBaseTest):
+    def test_listing_admin_exposes_file_uploads(self):
+        admin_user = User.objects.create_superuser(
+            username="listing-admin", email="listing-admin@example.com", password="test-password-123",
+        )
+        self.client.force_login(admin_user)
+        response = self.client.get(reverse("admin:core_rentallisting_add"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'name="images-0-image"')
+
+    def test_uploaded_listing_photo_is_used_and_shown_in_gallery(self):
+        image_data = BytesIO()
+        Image.new("RGB", (2, 2), color="green").save(image_data, format="PNG")
+        with TemporaryDirectory() as media_root, override_settings(MEDIA_ROOT=media_root):
+            uploaded_image = SimpleUploadedFile(
+                "home.png",
+                image_data.getvalue(),
+                content_type="image/png",
+            )
+            photo = ListingImage.objects.create(listing=self.home, image=uploaded_image)
+            self.assertEqual(self.home.image_url, photo.image.url)
+            response = self.client.get(reverse("listing-detail", args=[self.home.slug]))
+            self.assertEqual(response.status_code, 200)
+            self.assertContains(response, photo.image.url)
+
+    def test_listing_photo_formset_rejects_more_than_ten_images(self):
+        image_data = BytesIO()
+        Image.new("RGB", (2, 2), color="blue").save(image_data, format="PNG")
+        image_bytes = image_data.getvalue()
+        formset_type = inlineformset_factory(
+            RentalListing,
+            ListingImage,
+            form=ListingImageForm,
+            formset=ListingImageInlineFormSet,
+            fields=("image",),
+            extra=0,
+            max_num=10,
+            fk_name="listing",
+        )
+        data = {
+            "images-TOTAL_FORMS": "11",
+            "images-INITIAL_FORMS": "0",
+            "images-MIN_NUM_FORMS": "0",
+            "images-MAX_NUM_FORMS": "10",
+        }
+        files = {
+            f"images-{index}-image": SimpleUploadedFile(
+                f"home-{index}.png", image_bytes, content_type="image/png",
+            )
+            for index in range(11)
+        }
+        formset = formset_type(data, files, instance=self.home, prefix="images")
+        self.assertFalse(formset.is_valid())
+        self.assertIn("10 ta rasm yuklash mumkin", str(formset.non_form_errors()))
 
 
 class BookingTests(StartAppBaseTest):
