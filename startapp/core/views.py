@@ -139,7 +139,6 @@ def home(request):
         "today": timezone.localdate().isoformat(),
         "home_count": RentalListing.objects.filter(is_active=True, kind=RentalListing.Kind.HOME).count(),
         "car_count": RentalListing.objects.filter(is_active=True, kind=RentalListing.Kind.CAR).count(),
-        "ai_enabled": bool(getattr(settings, "OPENAI_API_KEY", "")),
     }
     return render(request, "core/home.html", context)
 

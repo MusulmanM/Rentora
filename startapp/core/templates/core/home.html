@@ -1,7 +1,6 @@
 {% extends 'core/base.html' %}
 {% load static core_tags %}
 {% block title %}Rentora — Ijara endi oson{% endblock %}
-{% block extra_head %}<link rel="stylesheet" href="{% static 'core/ai-assistant.css' %}">{% endblock %}
 {% block content %}
 <header class="site-header wrap">
   <a class="brand" href="{% url 'home' %}" aria-label="Rentora bosh sahifa"><span class="brand-symbol"><i></i><i></i><i></i></span><span>Rentora</span></a>
@@ -30,22 +29,6 @@
     </div>
   </section>
 
-  <section class="ai-search wrap" aria-labelledby="ai-search-title" data-ai-search>
-    <div class="ai-search-heading"><span class="ai-search-spark">✦</span><div><strong id="ai-search-title">Rentora AI</strong><small>Ijara qidiruvi, saralash va narx hisob-kitobi</small></div></div>
-    {% if ai_enabled %}
-    <form class="ai-search-form" action="{% url 'ai-rental-search' %}" method="post">
-      {% csrf_token %}
-      <label class="visually-hidden" for="ai-rental-query">Ijara so'rovingiz</label>
-      <input id="ai-rental-query" name="message" type="text" maxlength="500" placeholder="Masalan: Toshkentda 4 kishilik uyni 3 kunga, arzonidan top" required>
-      <button class="btn btn-dark" type="submit">AI bilan qidirish <span>→</span></button>
-    </form>
-    {% else %}
-    <p class="ai-search-config">AI yordamchini yoqish uchun serverda OPENAI_API_KEY sozlang.</p>
-    {% endif %}
-    <p class="ai-search-status" data-ai-status role="status" aria-live="polite"></p>
-    <div class="ai-search-results" data-ai-results></div>
-  </section>
-
   <section class="quick-stats wrap"><div><strong>{{ home_count|add:car_count }}+</strong><span>Ijara variantlari</span></div><div><strong>{{ home_count }}</strong><span>Qulay uylar</span></div><div><strong>{{ car_count }}</strong><span>Tayyor avtomobillar</span></div><div class="stat-promise"><span class="promise-icon">✓</span><span>Bronlaringiz<br><b>bir joyda</b></span></div></section>
 
   <section class="listing-section wrap" id="listings"><div class="section-heading"><div><p class="section-kicker">SIZ UCHUN TANLADIK</p><h2>{% if selected_kind == 'car' %}Safarga tayyor avtomobillar{% elif selected_kind == 'home' %}Yashash uchun qulay uylar{% else %}Ommabop ijara variantlari{% endif %}</h2><p class="section-subtitle">Talabingizga mos variantni toping, narxini ko'ring va sanalarni belgilang.</p></div><div class="filter-pills"><a class="filter-pill {% if not selected_kind %}active{% endif %}" href="{% url 'home' %}#listings">Barchasi</a><a class="filter-pill {% if selected_kind == 'home' %}active{% endif %}" href="?kind=home#listings">Uylar</a><a class="filter-pill {% if selected_kind == 'car' %}active{% endif %}" href="?kind=car#listings">Avtomobillar</a></div></div>
@@ -61,4 +44,4 @@
 </main>
 <footer class="site-footer wrap"><a class="brand" href="{% url 'home' %}"><span class="brand-symbol"><i></i><i></i><i></i></span><span>Rentora</span></a><p>O'zbekistonda qulay ijara — uylar va avtomobillar bir joyda.</p><div class="footer-right"><a href="#listings">Ijara topish</a><a href="{% url 'contact-admin' %}">Admin bilan bog'lanish</a>{% if request.user.is_authenticated %}<a href="{% url 'profile' %}">Profil</a>{% endif %}<span>© {% now "Y" %} Rentora</span></div></footer>
 {% endblock %}
-{% block scripts %}<script src="{% static 'core/location-select.js' %}" defer></script><script src="{% static 'core/ai-assistant.js' %}" defer></script>{% endblock %}
+{% block scripts %}<script src="{% static 'core/location-select.js' %}" defer></script>{% endblock %}

@@ -9,13 +9,52 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{% static 'core/app.css' %}">
   <link rel="stylesheet" href="{% static 'core/account.css' %}">
+  <link rel="stylesheet" href="{% static 'core/ai-assistant.css' %}">
   {% block extra_head %}{% endblock %}
 </head>
 <body class="{% block body_class %}{% endblock %}">
   <div class="toast-stack" aria-live="polite">{% if messages %}{% for message in messages %}<div class="toast toast-{{ message.tags|default:'info' }}">{{ message }}</div>{% endfor %}{% endif %}</div>
   {% block content %}{% endblock %}
+  <div class="ai-chat-widget" data-ai-widget data-enabled="{% if ai_enabled %}true{% else %}false{% endif %}">
+    <button class="ai-chat-launcher" type="button" data-ai-open aria-controls="ai-chat-panel" aria-expanded="false" aria-label="Rentora AI panelini ochish">
+      <span class="ai-robot-mark" aria-hidden="true"><i></i><i></i><b></b></span>
+      <span class="ai-launcher-spark" aria-hidden="true">✦</span>
+    </button>
+    <section class="ai-chat-panel" id="ai-chat-panel" role="dialog" aria-modal="false" aria-labelledby="ai-chat-title" hidden>
+      <header class="ai-chat-header">
+        <span class="ai-robot-mark ai-robot-mark-small" aria-hidden="true"><i></i><i></i><b></b></span>
+        <div class="ai-chat-heading">
+          <h2 id="ai-chat-title">Rentora AI</h2>
+          <span>{% if ai_enabled %}Ijara qidiruvi va hisob-kitob{% else %}Hozircha sozlanmagan{% endif %}</span>
+        </div>
+        <button class="ai-chat-close" type="button" data-ai-close aria-label="Yordamchini yopish">×</button>
+      </header>
+      {% if ai_enabled %}
+      <div class="ai-chat-conversation" data-ai-conversation role="log" aria-live="polite" aria-relevant="additions text">
+        <div class="ai-chat-welcome" data-ai-welcome>
+          <p>Salom! Uy yoki avtomobil qidirish, variantlarni saralash va ijara narxini hisoblashda yordam beraman.</p>
+          <span>Masalan: “Samarqandda 3 kunga arzon uy top.”</span>
+        </div>
+      </div>
+      <form class="ai-chat-form" action="{% url 'ai-rental-search' %}" method="post" data-ai-form>
+        {% csrf_token %}
+        <label class="visually-hidden" for="ai-chat-message">Ijara bo'yicha savolingiz</label>
+        <input id="ai-chat-message" name="message" type="text" maxlength="500" placeholder="Qanday ijara qidiryapsiz?" autocomplete="off" required data-ai-input>
+        <button type="submit" aria-label="Xabarni yuborish" data-ai-send><span aria-hidden="true">↑</span></button>
+      </form>
+      <p class="ai-chat-scope">Faqat ijara qidiruvi, saralash va narx hisob-kitobi.</p>
+      {% else %}
+      <div class="ai-chat-disabled" data-ai-disabled>
+        <span class="ai-disabled-icon" aria-hidden="true">⚙</span>
+        <h3>AI yordamchi hozircha ishlamaydi</h3>
+        <p><span>Ijara bo'yicha qidiruvni yoqish uchun sayt ma'muri serverda</span> <code>OPENAI_API_KEY</code> <span>sozlash kerak.</span></p>
+      </div>
+      {% endif %}
+    </section>
+  </div>
   <script src="{% static 'core/i18n.js' %}" defer></script>
   <script src="{% static 'core/app.js' %}" defer></script>
+  <script src="{% static 'core/ai-assistant.js' %}" defer></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

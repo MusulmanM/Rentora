@@ -1,75 +1,152 @@
 (() => {
-  const assistant = document.querySelector("[data-ai-search]");
-  if (!assistant) return;
+  "use strict";
 
-  const form = assistant.querySelector(".ai-search-form");
-  const status = assistant.querySelector("[data-ai-status]");
-  const results = assistant.querySelector("[data-ai-results]");
-  if (!form || !status || !results) return;
+  const widget = document.querySelector("[data-ai-widget]");
+  if (!widget) return;
 
-  const button = form.querySelector("button[type=submit]");
-  const translate = (text) => window.startAppTranslate
-    ? window.startAppTranslate(text, window.startAppLanguage || "uz")
-    : text;
+  const launcher = widget.querySelector("[data-ai-open]");
+  const panel = widget.querySelector("#ai-chat-panel");
+  const closeButton = widget.querySelector("[data-ai-close]");
+  const form = widget.querySelector("[data-ai-form]");
+  const conversation = widget.querySelector("[data-ai-conversation]");
+  if (!launcher || !panel || !closeButton) return;
 
-  function addText(parent, tag, className, value) {
-    const element = document.createElement(tag);
-    if (className) element.className = className;
-    element.textContent = translate(value);
-    parent.append(element);
-    return element;
+  function translate(text) {
+    return window.startAppTranslate
+      ? window.startAppTranslate(text, window.startAppLanguage || "uz")
+      : text;
   }
 
-  function renderResults(items) {
-    results.replaceChildren();
+  function setOpen(isOpen) {
+    panel.hidden = !isOpen;
+    launcher.setAttribute("aria-expanded", String(isOpen));
+    if (isOpen) {
+      (form?.elements.message || closeButton).focus();
+    } else {
+      launcher.focus();
+    }
+  }
+
+  launcher.addEventListener("click", () => setOpen(panel.hidden));
+  closeButton.addEventListener("click", () => setOpen(false));
+  panel.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setOpen(false);
+    }
+  });
+
+  if (!form || !conversation || widget.dataset.enabled !== "true") return;
+
+  const input = form.elements.message;
+  const sendButton = form.querySelector("[data-ai-send]");
+
+  function scrollToLatest() {
+    conversation.scrollTop = conversation.scrollHeight;
+  }
+
+  function addTurn(role, text, options = {}) {
+    const turn = document.createElement("div");
+    turn.className = `ai-chat-turn is-${role}${options.loading ? " ai-chat-loading" : ""}`;
+    const bubble = document.createElement("div");
+    bubble.className = `ai-chat-bubble${options.error ? " is-error" : ""}`;
+    bubble.textContent = text;
+    turn.append(bubble);
+    conversation.append(turn);
+    scrollToLatest();
+    return turn;
+  }
+
+  function safeUrl(value) {
+    if (typeof value !== "string" || !value.trim()) return null;
+    try {
+      const url = new URL(value, window.location.href);
+      return ["http:", "https:"].includes(url.protocol) ? url.href : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function appendResults(items) {
+    if (!Array.isArray(items) || !items.length) return;
+
+    const section = document.createElement("section");
+    section.className = "ai-chat-results";
+    const heading = document.createElement("h3");
+    heading.className = "ai-chat-results-heading";
+    heading.textContent = translate("Ijara variantlari");
+    section.append(heading);
+
     const language = window.startAppLanguage || "uz";
-    const locale = { uz: "uz-UZ", ru: "ru-RU", en: "en-US" }[language];
+    const locale = { uz: "uz-UZ", ru: "ru-RU", en: "en-US" }[language] || "uz-UZ";
     const numberFormat = new Intl.NumberFormat(locale);
+
     for (const item of items) {
+      if (!item || typeof item !== "object") continue;
       const card = document.createElement("article");
       card.className = "ai-result-card";
-      if (item.image_url) {
-        try {
-          const imageUrl = new URL(item.image_url, window.location.href);
-          if (["http:", "https:"].includes(imageUrl.protocol)) {
-            const image = document.createElement("img");
-            image.src = imageUrl.href;
-            image.alt = item.title;
-            image.loading = "lazy";
-            card.append(image);
-          }
-        } catch {
-          // A missing or invalid optional image should not hide the rental result.
-        }
+      const imageUrl = safeUrl(item.image_url);
+      if (imageUrl) {
+        const image = document.createElement("img");
+        image.src = imageUrl;
+        image.alt = typeof item.title === "string" ? item.title : "";
+        image.loading = "lazy";
+        card.append(image);
       }
+
       const details = document.createElement("div");
       details.className = "ai-result-details";
-      const title = addText(details, "strong", "", item.title);
-      title.dataset.localizedText = "";
-      title.dataset.uz = item.title;
-      title.dataset.ru = item.title_ru || item.title;
-      title.dataset.en = item.title_en || item.title;
-      addText(details, "span", "", `${item.city}${item.region ? `, ${item.region}` : ""} · ${item.kind}`);
-      const price = item.total_price
-        ? `${numberFormat.format(Number(item.total_price))} so'm · ${item.rental_days} kun`
-        : `${numberFormat.format(Number(item.price_per_day))} so'm / kun`;
-      addText(details, "span", "ai-result-price", price);
-      const link = document.createElement("a");
-      link.className = "btn btn-dark btn-small";
-      link.href = item.url;
-      link.textContent = translate("Ko'rish");
-      details.append(link);
+      const title = document.createElement("strong");
+      title.textContent = typeof item.title === "string" ? item.title : "";
+      details.append(title);
+
+      const location = document.createElement("span");
+      const city = typeof item.city === "string" ? item.city : "";
+      const region = typeof item.region === "string" ? item.region : "";
+      const kind = typeof item.kind === "string" ? item.kind : "";
+      location.textContent = [region ? `${city}, ${region}` : city, kind].filter(Boolean).join(" · ");
+      details.append(location);
+
+      const price = Number(item.total_price || item.price_per_day);
+      const priceLabel = document.createElement("span");
+      priceLabel.className = "ai-result-price";
+      if (Number.isFinite(price)) {
+        const period = item.total_price
+          ? ` · ${numberFormat.format(Number(item.rental_days) || 0)} ${translate("kun")}`
+          : ` / ${translate("kun")}`;
+        priceLabel.textContent = `${numberFormat.format(price)} ${translate("so'm")}${period}`;
+      }
+      details.append(priceLabel);
+
+      const linkUrl = safeUrl(item.url);
+      if (linkUrl) {
+        const link = document.createElement("a");
+        link.className = "ai-result-link";
+        link.href = linkUrl;
+        link.textContent = translate("Ko'rish");
+        details.append(link);
+      }
+
       card.append(details);
-      results.append(card);
+      section.append(card);
+    }
+    if (section.querySelector(".ai-result-card")) {
+      conversation.append(section);
+      scrollToLatest();
     }
   }
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
-    status.textContent = translate("Ijara variantlari qidirilmoqda…");
-    status.classList.remove("is-error");
-    results.replaceChildren();
-    button.disabled = true;
+    const message = input.value.trim();
+    if (!message || sendButton.disabled) return;
+
+    addTurn("user", message);
+    input.value = "";
+    input.disabled = true;
+    sendButton.disabled = true;
+    form.setAttribute("aria-busy", "true");
+    const loadingTurn = addTurn("assistant", translate("Ijara variantlari qidirilmoqda…"), { loading: true });
 
     try {
       const response = await fetch(form.action, {
@@ -78,17 +155,25 @@
           "Content-Type": "application/json",
           "X-CSRFToken": form.querySelector("[name=csrfmiddlewaretoken]").value,
         },
-        body: JSON.stringify({ message: form.elements.message.value.trim() }),
+        body: JSON.stringify({ message }),
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.detail || "AI so'rovini bajarib bo'lmadi.");
-      status.textContent = translate(data.message);
-      renderResults(data.results || []);
+      if (!response.ok) {
+        throw new Error(typeof data.detail === "string" ? data.detail : "AI so'rovini bajarib bo'lmadi.");
+      }
+
+      const reply = typeof data.message === "string" ? data.message : "AI javobi olinmadi.";
+      loadingTurn.remove();
+      addTurn("assistant", translate(reply));
+      appendResults(data.results);
     } catch (error) {
-      status.textContent = translate(error.message || "Ulanishda xatolik yuz berdi.");
-      status.classList.add("is-error");
+      loadingTurn.remove();
+      addTurn("assistant", translate(error.message || "Ulanishda xatolik yuz berdi."), { error: true });
     } finally {
-      button.disabled = false;
+      input.disabled = false;
+      sendButton.disabled = false;
+      form.removeAttribute("aria-busy");
+      input.focus();
     }
   });
 })();
