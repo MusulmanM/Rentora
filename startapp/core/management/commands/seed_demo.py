@@ -1,5 +1,5 @@
 from django.core.management.base import BaseCommand
-from core.models import RentalListing
+from core.models import District, Region, RentalListing
 
 
 LISTINGS = [
@@ -72,8 +72,28 @@ class Command(BaseCommand):
             defaults = item.copy()
             kind = defaults.pop("kind")
             title = defaults.pop("title")
+            region_code = {"Toshkent": 14, "Samarqand": 8, "Buxoro": 3}.get(defaults["city"])
+            region = Region.objects.filter(pk=region_code).first() if region_code else None
+            district = None
+            if region:
+                district = next(
+                    (
+                        candidate for candidate in District.objects.filter(region=region)
+                        if candidate.name_uz.lower() in defaults["address"].lower()
+                    ),
+                    None,
+                )
+                if district is None:
+                    district = District.objects.filter(
+                        region=region, name_uz__iexact=f"{defaults['city']} shahri",
+                    ).first()
+            if region:
+                defaults["region"] = region
+            if district:
+                defaults["district"] = district
+                defaults["city"] = district.name_uz
             _, was_created = RentalListing.objects.update_or_create(
-                title=title, city=defaults["city"], defaults={"kind": kind, "title": title, **defaults}
+                title=title, defaults={"kind": kind, "title": title, **defaults}
             )
             if was_created:
                 created += 1

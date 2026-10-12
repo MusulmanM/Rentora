@@ -1,0 +1,21 @@
+{% extends 'core/base.html' %}
+{% block title %}Ijara beruvchi bo'lish — Rentora{% endblock %}
+{% block body_class %}auth-body{% endblock %}
+{% block content %}
+<div class="auth-shell">
+  <a class="brand auth-brand" href="{% url 'profile' %}"><span class="brand-symbol"><i></i><i></i><i></i></span><span>Rentora</span></a>
+  <div class="auth-card">
+    <a class="auth-back-link" href="{% url 'profile' %}">← Profil</a>
+    <div class="auth-symbol">⌂</div>
+    <p class="section-kicker">IJARA BERUVCHI</p>
+    <h1>Yangi profil yarating.</h1>
+    <p class="auth-subtitle">Qayta foydalanuvchi hisobi yaratish shart emas — tasdiqlangan telefoningiz shu hisobga bog'lanadi.</p>
+    <form method="post" class="auth-form">
+      {% csrf_token %}
+      {% if form.non_field_errors %}<div class="form-error-box">{{ form.non_field_errors }}</div>{% endif %}
+      {% for field in form %}<div class="form-field"><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% if field.errors %}<small class="field-error">{{ field.errors|striptags }}</small>{% endif %}</div>{% endfor %}
+      <button class="btn btn-dark auth-submit" type="submit">Ijara beruvchi bo'lish <span>→</span></button>
+    </form>
+  </div>
+</div>
+{% endblock %}

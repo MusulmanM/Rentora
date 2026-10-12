@@ -3,11 +3,14 @@ from decimal import Decimal
 import hashlib
 from io import BytesIO
 import json
+from io import StringIO
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.utils.datastructures import MultiValueDict
 from django.forms.models import inlineformset_factory
 from django.test import TestCase, override_settings
 from django.urls import reverse
@@ -16,7 +19,11 @@ from PIL import Image
 from rest_framework.test import APIClient
 
 from .admin import ListingImageForm, ListingImageInlineFormSet
-from .models import Booking, BookingOrder, ListingImage, RentalListing
+from .forms import RentalListingForm
+from .models import (
+    Booking, BookingOrder, ContactMessage, District, HostProfile, ListingImage,
+    PendingRegistration, Region, RentalListing, TelegramAccount, UserProfile,
+)
 
 User = get_user_model()
 
@@ -69,6 +76,8 @@ class WebsiteTests(StartAppBaseTest):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Tavsif")
         self.assertContains(response, "250 000")
+        self.assertContains(response, "data-gallery-dialog")
+        self.assertContains(response, "core/listing-gallery.js")
 
     def test_health_endpoint(self):
         response = self.client.get(reverse("health"))
@@ -133,14 +142,35 @@ class WebsiteTests(StartAppBaseTest):
         )
         self.assertEqual(response.status_code, 400)
 
-    def test_registration_creates_user_and_logs_in(self):
+    @patch("core.views.send_message")
+    def test_registration_requires_and_completes_telegram_otp(self, send_telegram):
+        TelegramAccount.objects.create(
+            phone_number="+998901234567", telegram_user_id="70001", chat_id="70001",
+        )
         response = self.client.post(reverse("register"), {
             "first_name": "Aziz", "username": "aziz-123", "email": "aziz@example.com",
+            "phone_number": "+998 90 123 45 67",
             "password1": "some-long-safe-password-96", "password2": "some-long-safe-password-96",
         })
+        self.assertRedirects(response, reverse("verify-registration"))
+        pending = PendingRegistration.objects.get(phone_number="+998901234567")
+        sent_code = send_telegram.call_args.args[1].split(": ")[1].splitlines()[0]
+        response = self.client.post(reverse("verify-registration"), {"code": sent_code})
         self.assertRedirects(response, reverse("home"))
-        self.assertTrue(User.objects.filter(username="aziz-123").exists())
+        user = User.objects.get(username="aziz-123")
+        self.assertTrue(UserProfile.objects.filter(user=user, phone_number="+998901234567").exists())
+        self.assertFalse(PendingRegistration.objects.filter(pk=pending.pk).exists())
         self.assertIn("_auth_user_id", self.client.session)
+
+    def test_registration_requires_a_telegram_contact(self):
+        response = self.client.post(reverse("register"), {
+            "first_name": "Aziz", "username": "aziz-123", "email": "aziz@example.com",
+            "phone_number": "+998 90 123 45 67",
+            "password1": "some-long-safe-password-96", "password2": "some-long-safe-password-96",
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Avval Telegram botga kirib")
+        self.assertFalse(User.objects.filter(username="aziz-123").exists())
 
 
 class ListingImageTests(StartAppBaseTest):
@@ -197,6 +227,211 @@ class ListingImageTests(StartAppBaseTest):
         formset = formset_type(data, files, instance=self.home, prefix="images")
         self.assertFalse(formset.is_valid())
         self.assertIn("10 ta rasm yuklash mumkin", str(formset.non_form_errors()))
+
+    def test_admin_listing_page_shows_a_clickable_photo_preview(self):
+        admin_user = User.objects.create_superuser(
+            username="listing-preview-admin", email="listing-preview@example.com", password="test-password-123456",
+        )
+        image_data = BytesIO()
+        Image.new("RGB", (2, 2), color="purple").save(image_data, format="PNG")
+        with TemporaryDirectory() as media_root, override_settings(MEDIA_ROOT=media_root):
+            photo = ListingImage.objects.create(
+                listing=self.home,
+                image=SimpleUploadedFile("preview.png", image_data.getvalue(), content_type="image/png"),
+            )
+            self.client.force_login(admin_user)
+            response = self.client.get(reverse("admin:core_rentallisting_change", args=[self.home.pk]))
+            self.assertEqual(response.status_code, 200)
+            self.assertContains(response, "admin-image-preview")
+            self.assertContains(response, photo.image.url)
+
+
+class AccountLocationAndProviderTests(StartAppBaseTest):
+    def _link_telegram_phone(self, phone_number="+998901234567", telegram_id="70001"):
+        account = TelegramAccount.objects.create(
+            phone_number=phone_number,
+            telegram_user_id=telegram_id,
+            chat_id=telegram_id,
+        )
+        UserProfile.objects.create(
+            user=self.user,
+            phone_number=phone_number,
+            telegram_account=account,
+        )
+        return account
+
+    def _png_upload(self, name="listing.png"):
+        image_data = BytesIO()
+        Image.new("RGB", (4, 4), color="green").save(image_data, format="PNG")
+        return SimpleUploadedFile(name, image_data.getvalue(), content_type="image/png")
+
+    def test_uzbekistan_reference_data_includes_all_regions_and_districts(self):
+        self.assertEqual(Region.objects.count(), 14)
+        self.assertEqual(District.objects.count(), 209)
+
+    def test_demo_seed_assigns_region_and_district(self):
+        call_command("seed_demo", stdout=StringIO())
+        listing = RentalListing.objects.get(title="Yorug' va zamonaviy apartament")
+        self.assertEqual(listing.region_id, 14)
+        self.assertIsNotNone(listing.district_id)
+
+    def test_district_api_filters_by_region(self):
+        region = Region.objects.get(pk=14)
+        expected = District.objects.filter(region=region).count()
+        response = self.client.get(reverse("api-districts"), {"region_id": region.pk})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()["results"]), expected)
+        self.assertTrue(all(row["region_id"] == region.pk for row in response.json()["results"]))
+
+    def test_home_filters_listings_by_selected_region_and_district(self):
+        region = Region.objects.get(pk=14)
+        district = District.objects.filter(region=region).first()
+        self.home.region = region
+        self.home.district = district
+        self.home.city = district.name_uz
+        self.home.save()
+        response = self.client.get(reverse("home"), {
+            "region": region.pk, "district": district.pk,
+        })
+        self.assertContains(response, "Test apartment")
+        self.assertNotContains(response, "Test car")
+        self.assertContains(response, 'data-location-region')
+
+    def test_telegram_webhook_links_only_the_sender_own_contact(self):
+        update = {
+            "update_id": 1,
+            "message": {
+                "from": {"id": 70001},
+                "chat": {"id": 70001, "type": "private"},
+                "contact": {"user_id": 70001, "phone_number": "+998 90 123 45 67"},
+            },
+        }
+        with override_settings(TELEGRAM_WEBHOOK_SECRET="webhook-secret"), patch("core.views.send_message"):
+            response = self.client.post(
+                reverse("telegram-webhook"),
+                data=json.dumps(update),
+                content_type="application/json",
+                HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN="webhook-secret",
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(TelegramAccount.objects.filter(
+            phone_number="+998901234567", telegram_user_id="70001",
+        ).exists())
+
+    def test_telegram_webhook_rejects_wrong_secret_and_shared_contact(self):
+        denied = self.client.post(
+            reverse("telegram-webhook"), data="{}", content_type="application/json",
+            HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN="wrong",
+        )
+        self.assertEqual(denied.status_code, 403)
+        update = {
+            "message": {
+                "from": {"id": 70001},
+                "chat": {"id": 70001, "type": "private"},
+                "contact": {"user_id": 99999, "phone_number": "+998 90 123 45 67"},
+            },
+        }
+        with override_settings(TELEGRAM_WEBHOOK_SECRET="webhook-secret"):
+            response = self.client.post(
+                reverse("telegram-webhook"), data=json.dumps(update), content_type="application/json",
+                HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN="webhook-secret",
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(TelegramAccount.objects.exists())
+
+    @patch("core.views.send_message")
+    def test_existing_user_can_verify_phone_then_become_provider(self, send_telegram):
+        account = TelegramAccount.objects.create(
+            phone_number="+998901234567", telegram_user_id="70001", chat_id="70001",
+        )
+        self.client.force_login(self.user)
+        response = self.client.post(reverse("verify-profile-phone"), {
+            "phone_number": "+998 90 123 45 67",
+        })
+        self.assertRedirects(response, reverse("confirm-profile-phone"))
+        sent_code = send_telegram.call_args.args[1].split(": ")[1].splitlines()[0]
+        response = self.client.post(reverse("confirm-profile-phone"), {"code": sent_code})
+        self.assertRedirects(response, reverse("profile"))
+        self.assertTrue(UserProfile.objects.filter(user=self.user, telegram_account=account).exists())
+
+        response = self.client.post(reverse("provider-onboarding"), {"display_name": "Aziz uy ijarasi"})
+        self.assertRedirects(response, reverse("provider-dashboard"))
+        self.assertTrue(HostProfile.objects.filter(user=self.user).exists())
+
+    def test_unverified_user_cannot_start_provider_onboarding(self):
+        self.client.force_login(self.user)
+        response = self.client.post(reverse("provider-onboarding"), {"display_name": "Aziz"})
+        self.assertRedirects(response, reverse("profile"))
+        self.assertFalse(HostProfile.objects.filter(user=self.user).exists())
+
+    def test_provider_can_create_listing_with_location_and_uploaded_photo(self):
+        self._link_telegram_phone()
+        HostProfile.objects.create(user=self.user, display_name="Aziz ijarasi")
+        self.client.force_login(self.user)
+        region = Region.objects.get(pk=13)
+        district = District.objects.filter(region=region).first()
+        listing_data = {
+            "kind": "home",
+            "title": "Xorazmdagi yangi uy",
+            "title_ru": "",
+            "title_en": "",
+            "region": region.pk,
+            "district": district.pk,
+            "address": "Markaziy ko'cha",
+            "description": "Yangi e'lon uchun batafsil tavsif.",
+            "description_ru": "",
+            "description_en": "",
+            "price_per_day": "180000",
+            "capacity": "4",
+            "bedrooms": "2",
+            "bathrooms": "1",
+            "brand": "",
+            "transmission": "na",
+            "year": "",
+            "image_uploads": self._png_upload(),
+        }
+        with TemporaryDirectory() as media_root, override_settings(MEDIA_ROOT=media_root):
+            response = self.client.post(reverse("provider-create-listing"), listing_data)
+            self.assertRedirects(response, reverse("provider-dashboard"))
+            listing = RentalListing.objects.get(title="Xorazmdagi yangi uy")
+            self.assertEqual(listing.owner, self.user)
+            self.assertEqual(listing.region, region)
+            self.assertEqual(listing.district, district)
+            self.assertEqual(listing.city, district.name_uz)
+            self.assertEqual(listing.images.count(), 1)
+            self.assertTrue(listing.images.first().image.storage.exists(listing.images.first().image.name))
+
+    def test_provider_listing_form_rejects_more_than_ten_photos(self):
+        region = Region.objects.get(pk=14)
+        district = District.objects.filter(region=region).first()
+        upload = SimpleUploadedFile("photo.png", b"x", content_type="image/png")
+        files = MultiValueDict({"image_uploads": [upload] * 11})
+        form = RentalListingForm(
+            data={
+                "kind": "home", "title": "Ko'p rasm", "region": region.pk,
+                "district": district.pk, "address": "Markaz",
+                "description": "Batafsil tavsif.", "price_per_day": "100000",
+            },
+            files=files,
+        )
+        self.assertFalse(form.is_valid())
+        self.assertIn("10 ta rasm yuklash mumkin", str(form.errors["image_uploads"]))
+
+    def test_contact_form_saves_message_for_admin(self):
+        response = self.client.post(reverse("contact-admin"), {
+            "name": "Aziz", "email": "aziz@example.com",
+            "subject": "Yordam", "message": "Savolim bor.",
+        })
+        self.assertRedirects(response, reverse("contact-admin"))
+        contact = ContactMessage.objects.get(subject="Yordam")
+        self.assertEqual(contact.user, None)
+        admin_user = User.objects.create_superuser(
+            username="contact-admin", email="admin@example.com", password="test-password-123456",
+        )
+        self.client.force_login(admin_user)
+        admin_response = self.client.get(reverse("admin:core_contactmessage_changelist"))
+        self.assertEqual(admin_response.status_code, 200)
+        self.assertContains(admin_response, "Yordam")
 
 
 class BookingTests(StartAppBaseTest):
