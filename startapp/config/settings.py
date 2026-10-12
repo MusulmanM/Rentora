@@ -1,4 +1,4 @@
-"""Settings for the StartApp starter project."""
+"""Settings for the Rentora project."""
 import os
 from pathlib import Path
 

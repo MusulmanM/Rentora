@@ -1,4 +1,4 @@
-# StartApp test report
+# Rentora test report
 
 ## Checks completed in this build environment
 

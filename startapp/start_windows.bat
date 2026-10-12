@@ -37,7 +37,7 @@ if /I "%create_admin%"=="Y" (
   if errorlevel 1 goto failed
 )
 echo.
-echo StartApp is ready. Open http://127.0.0.1:8000 in your browser.
+echo Rentora is ready. Open http://127.0.0.1:8000 in your browser.
 python manage.py runserver
 exit /b 0
 :failed

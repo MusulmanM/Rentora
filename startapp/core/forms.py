@@ -37,13 +37,19 @@ class RegistrationForm(UserCreationForm):
 class BookingForm(forms.ModelForm):
     class Meta:
         model = Booking
-        fields = ("check_in", "check_out", "guests")
+        fields = ("check_in", "check_out", "guests", "payment_method")
         widgets = {
             "check_in": forms.DateInput(attrs={"type": "date", "class": "form-input"}, format="%Y-%m-%d"),
             "check_out": forms.DateInput(attrs={"type": "date", "class": "form-input"}, format="%Y-%m-%d"),
             "guests": forms.NumberInput(attrs={"class": "form-input", "min": 1}),
+            "payment_method": forms.Select(attrs={"class": "form-input"}),
         }
-        labels = {"check_in": "Boshlanish sanasi", "check_out": "Tugash sanasi", "guests": "Mehmonlar / yo'lovchilar"}
+        labels = {
+            "check_in": "Boshlanish sanasi",
+            "check_out": "Tugash sanasi",
+            "guests": "Mehmonlar / yo'lovchilar",
+            "payment_method": "To'lov turi",
+        }
 
     def __init__(self, *args, listing=None, user=None, **kwargs):
         self.listing = listing
