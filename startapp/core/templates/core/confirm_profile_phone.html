@@ -1,0 +1,25 @@
+{% extends 'core/base.html' %}
+{% block title %}Telefonni tasdiqlash — Rentora{% endblock %}
+{% block body_class %}auth-body{% endblock %}
+{% block content %}
+<div class="auth-shell">
+  <a class="brand auth-brand" href="{% url 'profile' %}"><span class="brand-symbol"><i></i><i></i><i></i></span><span>Rentora</span></a>
+  <div class="auth-card">
+    <a class="auth-back-link" href="{% url 'profile' %}">← Profil</a>
+    <div class="auth-symbol">✓</div>
+    <p class="section-kicker">TELEGRAM TASDIQLASH</p>
+    <h1>Kodni kiriting.</h1>
+    <p class="auth-subtitle">Telegram botga yuborilgan 6 xonali kodni 10 daqiqa ichida kiriting.</p>
+    <form method="post" class="auth-form">
+      {% csrf_token %}
+      {% if form.non_field_errors %}<div class="form-error-box">{{ form.non_field_errors }}</div>{% endif %}
+      <div class="form-field"><label for="{{ form.code.id_for_label }}">{{ form.code.label }}</label>{{ form.code }}{% if form.code.errors %}<small class="field-error">{{ form.code.errors|striptags }}</small>{% endif %}</div>
+      <button class="btn btn-dark auth-submit" type="submit">Telefonni tasdiqlash <span>→</span></button>
+    </form>
+    <form method="post" action="{% url 'resend-profile-phone-otp' %}" class="auth-form">
+      {% csrf_token %}
+      <button class="btn btn-outline auth-submit" type="submit">Kodni qayta yuborish</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

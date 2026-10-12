@@ -8,6 +8,130 @@ from django.utils import timezone
 from django.utils.text import slugify
 
 
+class Region(models.Model):
+    code = models.PositiveSmallIntegerField(primary_key=True)
+    name_uz = models.CharField(max_length=100)
+    name_en = models.CharField(max_length=100)
+    name_ru = models.CharField(max_length=100)
+
+    class Meta:
+        ordering = ["name_uz"]
+        verbose_name = "Viloyat"
+        verbose_name_plural = "Viloyatlar"
+
+    def __str__(self):
+        return self.name_uz
+
+
+class District(models.Model):
+    code = models.PositiveSmallIntegerField(primary_key=True)
+    region = models.ForeignKey(Region, on_delete=models.PROTECT, related_name="districts")
+    name_uz = models.CharField(max_length=100)
+    name_en = models.CharField(max_length=100)
+    name_ru = models.CharField(max_length=100)
+
+    class Meta:
+        ordering = ["name_uz"]
+        verbose_name = "Shahar / tuman"
+        verbose_name_plural = "Shaharlar va tumanlar"
+        indexes = [models.Index(fields=["region", "name_uz"], name="core_district_region_name_idx")]
+
+    def __str__(self):
+        return f"{self.name_uz} — {self.region.name_uz}"
+
+
+class TelegramAccount(models.Model):
+    phone_number = models.CharField(max_length=16, unique=True)
+    telegram_user_id = models.CharField(max_length=32, unique=True)
+    chat_id = models.CharField(max_length=32, unique=True)
+    last_otp_sent_at = models.DateTimeField(null=True, blank=True)
+    linked_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Telegram hisobi"
+        verbose_name_plural = "Telegram hisoblari"
+
+    def __str__(self):
+        return self.phone_number
+
+
+class UserProfile(models.Model):
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="profile")
+    phone_number = models.CharField(max_length=16, unique=True)
+    telegram_account = models.OneToOneField(
+        TelegramAccount, on_delete=models.PROTECT, related_name="profile",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Foydalanuvchi profili"
+        verbose_name_plural = "Foydalanuvchi profillari"
+
+    def __str__(self):
+        return f"{self.user} — {self.phone_number}"
+
+
+class PendingRegistration(models.Model):
+    username = models.CharField(max_length=150)
+    first_name = models.CharField(max_length=150)
+    email = models.EmailField()
+    phone_number = models.CharField(max_length=16)
+    password_hash = models.CharField(max_length=128)
+    telegram_account = models.OneToOneField(TelegramAccount, on_delete=models.CASCADE)
+    otp_hash = models.CharField(max_length=128)
+    expires_at = models.DateTimeField()
+    sent_at = models.DateTimeField()
+    attempts = models.PositiveSmallIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["phone_number", "expires_at"], name="core_pending_phone_exp_idx")]
+
+
+class PendingPhoneVerification(models.Model):
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="pending_phone_verification")
+    phone_number = models.CharField(max_length=16, unique=True)
+    telegram_account = models.ForeignKey(TelegramAccount, on_delete=models.CASCADE)
+    otp_hash = models.CharField(max_length=128)
+    expires_at = models.DateTimeField()
+    sent_at = models.DateTimeField()
+    attempts = models.PositiveSmallIntegerField(default=0)
+
+
+class HostProfile(models.Model):
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="host_profile")
+    display_name = models.CharField("Ijara beruvchi nomi", max_length=120)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Ijara beruvchi"
+        verbose_name_plural = "Ijara beruvchilar"
+
+    def __str__(self):
+        return self.display_name
+
+
+class ContactMessage(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, related_name="contact_messages",
+        null=True, blank=True,
+    )
+    name = models.CharField("Ism", max_length=120)
+    email = models.EmailField("Elektron pochta")
+    subject = models.CharField("Mavzu", max_length=160)
+    message = models.TextField("Xabar", max_length=5000)
+    created_at = models.DateTimeField(auto_now_add=True)
+    is_read = models.BooleanField("Ko'rildi", default=False)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Bog'lanish xabari"
+        verbose_name_plural = "Bog'lanish xabarlari"
+
+    def __str__(self):
+        return f"{self.subject} — {self.name}"
+
+
 class RentalListing(models.Model):
     class Kind(models.TextChoices):
         HOME = "home", "Uylar"
@@ -24,6 +148,16 @@ class RentalListing(models.Model):
     title_en = models.CharField("Title (EN)", max_length=160, blank=True)
     slug = models.SlugField(max_length=180, unique=True, blank=True)
     city = models.CharField("Shahar", max_length=80)
+    region = models.ForeignKey(
+        Region, on_delete=models.PROTECT, related_name="listings", null=True, blank=True,
+    )
+    district = models.ForeignKey(
+        District, on_delete=models.PROTECT, related_name="listings", null=True, blank=True,
+    )
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, related_name="owned_listings",
+        null=True, blank=True,
+    )
     address = models.CharField("Manzil", max_length=220)
     description = models.TextField("Tavsif (UZ)")
     description_ru = models.TextField("Описание (RU)", blank=True)
@@ -56,6 +190,12 @@ class RentalListing(models.Model):
                 number += 1
             self.slug = slug
         super().save(*args, **kwargs)
+
+    def clean(self):
+        if self.district_id and not self.region_id:
+            raise ValidationError({"region": "Shahar yoki tuman tanlanganda viloyat ham tanlanishi kerak."})
+        if self.region_id and self.district_id and self.district.region_id != self.region_id:
+            raise ValidationError({"district": "Tanlangan shahar yoki tuman viloyatga mos kelmaydi."})
 
     @property
     def is_home(self):

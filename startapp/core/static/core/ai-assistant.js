@@ -49,7 +49,7 @@
       title.dataset.uz = item.title;
       title.dataset.ru = item.title_ru || item.title;
       title.dataset.en = item.title_en || item.title;
-      addText(details, "span", "", `${item.city} · ${item.kind}`);
+      addText(details, "span", "", `${item.city}${item.region ? `, ${item.region}` : ""} · ${item.kind}`);
       const price = item.total_price
         ? `${numberFormat.format(Number(item.total_price))} so'm · ${item.rental_days} kun`
         : `${numberFormat.format(Number(item.price_per_day))} so'm / kun`;

@@ -179,11 +179,16 @@ def find_rentals(message):
             "results": [],
         }
 
-    listings = RentalListing.objects.filter(is_active=True).prefetch_related("images")
+    listings = RentalListing.objects.filter(is_active=True).select_related("region", "district").prefetch_related("images")
     if criteria["kind"]:
         listings = listings.filter(kind=criteria["kind"])
     if criteria["city"]:
-        listings = listings.filter(city__icontains=criteria["city"])
+        listings = listings.filter(
+            Q(city__icontains=criteria["city"])
+            | Q(district__name_uz__icontains=criteria["city"])
+            | Q(region__name_uz__icontains=criteria["city"])
+            | Q(region__name_en__icontains=criteria["city"])
+        )
     if criteria["guests"]:
         listings = listings.filter(capacity__gte=criteria["guests"])
     if criteria["bedrooms"]:
@@ -232,6 +237,7 @@ def find_rentals(message):
             "title_ru": listing.title_ru,
             "title_en": listing.title_en,
             "city": listing.city,
+            "region": listing.region.name_uz if listing.region_id else "",
             "kind": listing.get_kind_display(),
             "price_per_day": str(listing.price_per_day),
             "image_url": listing.primary_image_url,

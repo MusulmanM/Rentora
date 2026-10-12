@@ -2,8 +2,13 @@ from django import forms
 from django.contrib import admin
 from django.core.exceptions import ValidationError
 from django.forms.models import BaseInlineFormSet
+from django.utils.html import format_html
 
-from .models import Booking, BookingOrder, ListingImage, PaymentTransaction, RentalListing, home, car
+from .models import (
+    Booking, BookingOrder, ContactMessage, District, HostProfile, ListingImage, PaymentTransaction,
+    RentalListing, UserProfile, home, car,
+)
+from .forms import DistrictSelect
 
 
 class ListingImageInlineFormSet(BaseInlineFormSet):
@@ -39,25 +44,81 @@ class ListingImageInline(admin.TabularInline):
     formset = ListingImageInlineFormSet
     extra = 1
     max_num = 10
-    fields = ("image",)
+    fields = ("image_preview", "image")
+    readonly_fields = ("image_preview",)
     verbose_name = "Rasm (10 tagacha)"
     verbose_name_plural = "E'lon rasmlari (10 tagacha)"
+
+    class Media:
+        css = {"all": ("core/listing-images.css",)}
+
+    @admin.display(description="Ko'rinish")
+    def image_preview(self, obj):
+        if not obj or not obj.pk or not obj.image:
+            return "Rasm yuklangandan keyin ko'rinadi"
+        return format_html(
+            '<a class="admin-image-preview-link" href="{}" target="_blank" rel="noopener">'
+            '<img class="admin-image-preview" src="{}" alt="E’lon rasmi"></a>',
+            obj.image.url, obj.image.url,
+        )
+
+
+class RentalListingAdminForm(forms.ModelForm):
+    class Meta:
+        model = RentalListing
+        fields = "__all__"
+        widgets = {"district": DistrictSelect()}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        region_id = self.data.get("region") or self.instance.region_id
+        if region_id:
+            self.fields["district"].queryset = District.objects.filter(region_id=region_id)
+        self.fields["region"].widget.attrs["data-location-region"] = ""
+        self.fields["district"].widget.attrs["data-location-district"] = ""
 
 
 @admin.register(RentalListing)
 class RentalListingAdmin(admin.ModelAdmin):
+    form = RentalListingAdminForm
     inlines = (ListingImageInline,)
-    list_display = ("title", "kind", "city", "price_per_day", "is_featured", "is_active")
-    list_filter = ("kind", "city", "is_featured", "is_active")
+    list_display = ("title", "kind", "city", "region", "district", "owner", "price_per_day", "is_featured", "is_active")
+    list_filter = ("kind", "region", "district", "is_featured", "is_active")
     search_fields = ("title", "title_ru", "title_en", "city", "address", "description", "description_ru", "description_en", "brand")
     fieldsets = (
-        ("E'lon (o'zbekcha)", {"fields": ("kind", "title", "city", "address", "description")} ),
+        ("E'lon (o'zbekcha)", {"fields": ("kind", "title", "owner", "region", "district", "city", "address", "description")} ),
         ("Translations / Tarjimalar", {"fields": ("title_ru", "description_ru", "title_en", "description_en"), "classes": ("collapse",)}),
         ("Ijara shartlari", {"fields": ("price_per_day", "capacity", "bedrooms", "bathrooms", "brand", "transmission", "year")} ),
         ("Holat", {"fields": ("slug", "is_featured", "is_active")} ),
     )
     list_editable = ("is_featured", "is_active")
     prepopulated_fields = {"slug": ("title",)}
+
+    class Media:
+        js = ("core/location-select.js",)
+
+
+@admin.register(UserProfile)
+class UserProfileAdmin(admin.ModelAdmin):
+    list_display = ("user", "phone_number", "created_at")
+    search_fields = ("user__username", "user__email", "phone_number")
+    readonly_fields = ("user", "phone_number", "telegram_account", "created_at")
+
+
+@admin.register(HostProfile)
+class HostProfileAdmin(admin.ModelAdmin):
+    list_display = ("display_name", "user", "created_at")
+    search_fields = ("display_name", "user__username", "user__email")
+    readonly_fields = ("user", "created_at")
+
+
+@admin.register(ContactMessage)
+class ContactMessageAdmin(admin.ModelAdmin):
+    list_display = ("subject", "name", "email", "user", "created_at", "is_read")
+    list_filter = ("is_read", "created_at")
+    search_fields = ("subject", "name", "email", "message", "user__username")
+    list_editable = ("is_read",)
+    readonly_fields = ("user", "name", "email", "subject", "message", "created_at")
 
 
 @admin.register(Booking)

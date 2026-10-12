@@ -1,0 +1,17 @@
+{% extends 'core/base.html' %}
+{% load core_tags %}
+{% block title %}Ijara e'lonlarim — Rentora{% endblock %}
+{% block content %}
+<header class="site-header wrap"><a class="brand" href="{% url 'home' %}"><span class="brand-symbol"><i></i><i></i><i></i></span><span>Rentora</span></a><nav class="main-nav"><a href="{% url 'home' %}">Bosh sahifa</a><a href="{% url 'profile' %}">Profil</a></nav><div class="header-actions"><a class="user-pill" href="{% url 'profile' %}" aria-label="Profil">{{ request.user.first_name|default:request.user.username|first|upper }}</a></div></header>
+<main class="bookings-main wrap">
+  <div class="bookings-welcome"><div><p class="section-kicker">IJARA BERUVCHI KABINETI</p><h1>{{ host_profile.display_name }}</h1><p>E'lonlaringizni ko'ring va yangi ijara variantlarini joylang.</p></div><a class="btn btn-dark" href="{% url 'provider-create-listing' %}">＋ E'lon qo'shish</a></div>
+  <div class="listing-grid provider-listing-grid">
+    {% for listing in listings %}
+    <article class="listing-card">
+      <a class="listing-image-wrap" href="{% url 'listing-detail' listing.slug %}"><img class="listing-image" src="{{ listing.primary_image_url|default:'https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=900&q=85' }}" alt="{{ listing.title }}"><span class="listing-kind">{% if listing.is_active %}Faol{% else %}Yashirilgan{% endif %}</span></a>
+      <div class="listing-card-body"><div class="listing-location">{{ listing.district.name_uz|default:listing.city }}{% if listing.region %}, {{ listing.region.name_uz }}{% endif %}</div><h2 class="provider-listing-title"><a href="{% url 'listing-detail' listing.slug %}">{{ listing.title }}</a></h2><div class="listing-card-bottom"><strong>{{ listing.price_per_day|money }} so'm / kun</strong><a class="card-arrow" href="{% url 'listing-detail' listing.slug %}" aria-label="E'lonni ko'rish">↗</a></div></div>
+    </article>
+    {% empty %}<div class="empty-results"><h3>Hozircha e'lon yo'q</h3><p>Birinchi e'loningizni rasm va ijara shartlari bilan qo'shing.</p></div>{% endfor %}
+  </div>
+</main>
+{% endblock %}

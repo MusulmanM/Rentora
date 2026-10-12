@@ -1,0 +1,18 @@
+{% extends 'core/base.html' %}
+{% block title %}Admin bilan bog'lanish — Rentora{% endblock %}
+{% block body_class %}auth-body{% endblock %}
+{% block content %}
+<div class="auth-shell">
+  <a class="brand auth-brand" href="{% url 'home' %}"><span class="brand-symbol"><i></i><i></i><i></i></span><span>Rentora</span></a>
+  <div class="auth-card">
+    <a class="auth-back-link" href="{% url 'home' %}">← Bosh sahifa</a>
+    <div class="auth-symbol">✉</div><p class="section-kicker">YORDAM</p><h1>Admin bilan bog'laning.</h1>
+    <p class="auth-subtitle">Xabaringiz administratorlar paneliga yuboriladi.</p>
+    <form method="post" class="auth-form">{% csrf_token %}
+      {% if form.non_field_errors %}<div class="form-error-box">{{ form.non_field_errors }}</div>{% endif %}
+      {% for field in form %}<div class="form-field"><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% if field.errors %}<small class="field-error">{{ field.errors|striptags }}</small>{% endif %}</div>{% endfor %}
+      <button class="btn btn-dark auth-submit" type="submit">Xabarni yuborish <span>→</span></button>
+    </form>
+  </div>
+</div>
+{% endblock %}

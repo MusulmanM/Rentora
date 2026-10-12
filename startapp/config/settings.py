@@ -32,6 +32,9 @@ PAYME_MERCHANT_AUTHORIZATION = (
 PAYME_CHECKOUT_BASE_URL = os.environ.get("PAYME_CHECKOUT_BASE_URL", "https://checkout.paycom.uz")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_WEBHOOK_SECRET = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")
+TELEGRAM_BOT_USERNAME = os.environ.get("TELEGRAM_BOT_USERNAME", "").lstrip("@")
 
 INSTALLED_APPS = [
     "django.contrib.admin",

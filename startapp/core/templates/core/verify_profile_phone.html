@@ -1,0 +1,21 @@
+{% extends 'core/base.html' %}
+{% block title %}Telefonni tasdiqlash — Rentora{% endblock %}
+{% block body_class %}auth-body{% endblock %}
+{% block content %}
+<div class="auth-shell">
+  <a class="brand auth-brand" href="{% url 'profile' %}"><span class="brand-symbol"><i></i><i></i><i></i></span><span>Rentora</span></a>
+  <div class="auth-card">
+    <a class="auth-back-link" href="{% url 'profile' %}">← Profil</a>
+    <div class="auth-symbol">✓</div>
+    <p class="section-kicker">TELEFONNI TASDIQLASH</p>
+    <h1>Telefon raqamingiz.</h1>
+    <p class="auth-subtitle">Telegram botda kontaktni yuboring, so'ng shu yerga biriktiradigan raqamingizni kiriting.</p>
+    <form method="post" class="auth-form">
+      {% csrf_token %}
+      {% if form.non_field_errors %}<div class="form-error-box">{{ form.non_field_errors }}</div>{% endif %}
+      <div class="form-field"><label for="{{ form.phone_number.id_for_label }}">{{ form.phone_number.label }}</label>{{ form.phone_number }}{% if form.phone_number.errors %}<small class="field-error">{{ form.phone_number.errors|striptags }}</small>{% endif %}</div>
+      <button class="btn btn-dark auth-submit" type="submit">Telegram kodini olish <span>→</span></button>
+    </form>
+  </div>
+</div>
+{% endblock %}

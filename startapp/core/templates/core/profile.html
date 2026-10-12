@@ -1,0 +1,33 @@
+{% extends 'core/base.html' %}
+{% block title %}Profil — Rentora{% endblock %}
+{% block content %}
+<header class="site-header wrap">
+  <a class="brand" href="{% url 'home' %}"><span class="brand-symbol"><i></i><i></i><i></i></span><span>Rentora</span></a>
+  <nav class="main-nav"><a href="{% url 'home' %}">Bosh sahifa</a><a href="{% url 'my-bookings' %}">Bronlarim</a><a class="nav-active" href="{% url 'profile' %}">Profil</a></nav>
+  <div class="header-actions">{% include 'core/language_switcher.html' %}<a class="user-pill" href="{% url 'profile' %}" aria-label="Profil">{{ request.user.first_name|default:request.user.username|first|upper }}</a></div>
+</header>
+<main class="bookings-main wrap">
+  <div class="bookings-welcome"><div><p class="section-kicker">SHAXSIY KABINET</p><h1>Profil</h1><p>{{ request.user.first_name|default:request.user.username }}, hisobingiz va ijara faoliyatingizni shu yerdan boshqaring.</p></div><a class="btn btn-outline" href="{% url 'my-bookings' %}">Bronlarim</a></div>
+  <section class="profile-panel">
+    <h2>Hisob ma'lumotlari</h2>
+    <p><b>Foydalanuvchi:</b> {{ request.user.username }}</p>
+    <p><b>Elektron pochta:</b> {{ request.user.email }}</p>
+    {% if profile %}<p><b>Tasdiqlangan telefon:</b> {{ profile.phone_number }}</p>
+    {% else %}<p class="profile-notice">Telefon raqamingiz Telegram orqali tasdiqlanmagan.</p><a class="btn btn-dark" href="{% url 'verify-profile-phone' %}">Telefonni tasdiqlash</a>{% endif %}
+  </section>
+  <section class="profile-panel">
+    <h2>Ijara beruvchi bo'lish</h2>
+    {% if host_profile %}
+      <p><b>{{ host_profile.display_name }}</b> — ijara beruvchi profilingiz faol.</p>
+      <a class="btn btn-dark" href="{% url 'provider-dashboard' %}">E'lonlarim va panelim <span>→</span></a>
+    {% else %}
+      <p>Shu hisob bilan ijaraga beruvchi sifatida ro'yxatdan o'ting. Telefon tasdiqlangach, darhol e'lon qo'shishingiz mumkin.</p>
+      <a class="btn btn-dark" href="{% url 'provider-onboarding' %}">Ijara beruvchi sifatida ro'yxatdan o'tish <span>→</span></a>
+    {% endif %}
+  </section>
+  <section class="profile-panel">
+    <h2>Yordam kerakmi?</h2><p>Adminlarga saytdagi forma orqali xabar yuboring.</p>
+    <a class="btn btn-outline" href="{% url 'contact-admin' %}">Admin bilan bog'lanish</a>
+  </section>
+</main>
+{% endblock %}

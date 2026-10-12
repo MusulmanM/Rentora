@@ -21,6 +21,8 @@ class ListingSerializer(serializers.ModelSerializer):
     kind_label = serializers.CharField(source="get_kind_display", read_only=True)
     image_url = serializers.CharField(source="primary_image_url", read_only=True)
     images = serializers.SerializerMethodField()
+    region_name = serializers.CharField(source="region.name_uz", read_only=True, allow_null=True)
+    district_name = serializers.CharField(source="district.name_uz", read_only=True, allow_null=True)
 
     def get_images(self, listing):
         request = self.context.get("request")
@@ -31,6 +33,7 @@ class ListingSerializer(serializers.ModelSerializer):
         model = RentalListing
         fields = [
             "id", "title", "title_ru", "title_en", "slug", "kind", "kind_label", "city", "address",
+            "region", "region_name", "district", "district_name",
             "description", "description_ru", "description_en", "price_per_day", "image_url", "images", "capacity", "bedrooms", "bathrooms", "brand",
             "transmission", "year", "is_featured",
         ]

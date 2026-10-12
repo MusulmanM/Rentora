@@ -1,0 +1,20 @@
+{% extends 'core/base.html' %}
+{% load static %}
+{% block title %}Yangi ijara e'loni — Rentora{% endblock %}
+{% block body_class %}auth-body{% endblock %}
+{% block content %}
+<div class="auth-shell provider-form-shell">
+  <a class="brand auth-brand" href="{% url 'provider-dashboard' %}"><span class="brand-symbol"><i></i><i></i><i></i></span><span>Rentora</span></a>
+  <div class="auth-card provider-form-card">
+    <a class="auth-back-link" href="{% url 'provider-dashboard' %}">← Ijara beruvchi paneli</a>
+    <p class="section-kicker">YANGI E'LON</p><h1>Ijara variantini qo'shing.</h1>
+    <form method="post" enctype="multipart/form-data" class="auth-form provider-listing-form">
+      {% csrf_token %}
+      {% if form.non_field_errors %}<div class="form-error-box">{{ form.non_field_errors }}</div>{% endif %}
+      {% for field in form %}<div class="form-field {% if field.name == 'description' or field.name == 'description_ru' or field.name == 'description_en' or field.name == 'image_uploads' %}form-field-wide{% endif %}"><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}{% if field.errors %}<small class="field-error">{{ field.errors|striptags }}</small>{% endif %}</div>{% endfor %}
+      <button class="btn btn-dark auth-submit" type="submit">E'lonni saqlash <span>→</span></button>
+    </form>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}<script src="{% static 'core/location-select.js' %}" defer></script>{% endblock %}

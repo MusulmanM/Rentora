@@ -10,18 +10,22 @@ Interfeys o'zbek (`UZ`), rus (`RU`) va ingliz (`EN`) tillarida mavjud. Yuqori qi
 - Uy va avtomobillar katalogi: shahar, turi, mehmon/yo'lovchi soni va sanalar bo'yicha qidiruv.
 - E'lon tafsilotlari, kunlik narx va sanalarga qarab jami summani avtomatik hisoblash.
 - Ro'yxatdan o'tish, tizimga kirish va shaxsiy bronlar sahifasi.
+- Telefon raqamini Telegram orqali OTP bilan tasdiqlash; telefon raqami foydalanuvchilar orasida yagona bo'ladi.
+- Viloyat va shahar/tuman bo'yicha O'zbekistonning barcha hududlarini qidirish; tanlangan viloyat shahar/tuman ro'yxatini avtomatik cheklaydi.
+- Profil ichidan ijara beruvchi sifatida alohida yoqilish va shu hisob bilan e'lon joylash.
+- Saytdagi admin bilan bog'lanish formasi; yuborilgan xabarlar Django admin panelida saqlanadi.
 - Naqd bronni darhol saqlash; Click/karta yoki Payme tanlanganda mijozni buyurtmadan so'ng darhol onlayn to'lovga yo'naltirish.
 - Provayder to'lovi tasdiqlanmaguncha bron yozilmaydi; muvaffaqiyatli callback bronni tasdiqlaydi va sanalarni band qiladi.
 - Bron va buyurtmalarni bekor qilish; kutilayotgan buyurtmalar sanalarni boshqa mijozlardan vaqtincha band qiladi.
 - Bron holatlari: kutilmoqda, tasdiqlangan yoki bekor qilingan.
 - Django admin orqali e'lonlar, bronlar va to'lov yozuvlarini ko'rish hamda nom va tavsiflarning ruscha/inglizcha versiyalarini saqlash.
-- E'lon yaratishda admin paneldan 10 tagacha oddiy rasm faylini yuklash va galereyada ko'rsatish.
+- E'lon yaratishda 10 tagacha rasm faylini yuklash, admin panelda preview ko'rish va e'lon sahifasida galereyani modal oynada ko'rish.
 - Rentora AI tabiiy tildagi ijara so'rovlarini filtrlash, saralash va muddat bo'yicha ijara narxini hisoblash bilan cheklanadi.
 - JSON REST API va `/health/` health endpoint.
 - Telefon, planshet va desktop ekranlariga mos dizayn.
 - Demo uchun 8 ta uy/avtomobil e'lonini yaratadigan seed buyrug'i.
 
-> Click va Payme merchant API oqimlari tayyor; haqiqiy to'lovlar uchun merchant hisoblari, callback URL'lari va maxfiy environment sozlamalari talab qilinadi. SMS tasdiqlash, xarita API va real vaqt bildirishnomalari ulanmagan. Namuna rasmlari internet orqali yuklanadi.
+> Click va Payme merchant API oqimlari tayyor; haqiqiy to'lovlar uchun merchant hisoblari, callback URL'lari va maxfiy environment sozlamalari talab qilinadi. Telegram OTP uchun bot tokeni va HTTPS webhook sozlanishi kerak. Xarita API va real vaqt bildirishnomalari ulanmagan. Namuna rasmlari internet orqali yuklanadi.
 
 ## Talablar
 
@@ -59,6 +63,38 @@ python manage.py runserver
 
 Ixtiyoriy ravishda `.env.example` faylidan `.env` nusxa oling va qiymatlarni o'zgartiring.
 
+### Telegram OTP va telefonni tasdiqlash
+
+BotFather orqali Telegram bot yarating va quyidagi o'zgaruvchilarni `.env` fayliga kiriting:
+
+```dotenv
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_BOT_USERNAME=
+TELEGRAM_WEBHOOK_SECRET=
+```
+
+`TELEGRAM_WEBHOOK_SECRET` uchun 32 yoki undan uzun tasodifiy harf-raqamli qiymat ishlating. Sayt ommaviy HTTPS domenida bo'lishi shart. Webhook'ni Telegram'ga bir marta ro'yxatdan o'tkazing (`<...>` qiymatlarni hosting ma'lumotlari bilan almashtiring):
+
+```powershell
+$payload = @{
+  url = "https://<domen>/telegram/webhook/"
+  secret_token = $env:TELEGRAM_WEBHOOK_SECRET
+}
+Invoke-RestMethod -Method Post -Uri "https://api.telegram.org/bot$env:TELEGRAM_BOT_TOKEN/setWebhook" -Body $payload
+```
+
+Buyruqdan oldin terminalda `.env` faylingizdagi `TELEGRAM_BOT_TOKEN` va `TELEGRAM_WEBHOOK_SECRET` qiymatlarini `$env:TELEGRAM_BOT_TOKEN` hamda `$env:TELEGRAM_WEBHOOK_SECRET` environment o'zgaruvchilariga kiriting.
+
+`TELEGRAM_BOT_USERNAME` bot havolasidagi `@` belgisiz nomdir. Foydalanuvchi avval botni ochib `/start` yuboradi va bot so'ragan Telegram kontaktini o'zi ulashadi. Saytdagi ro'yxatdan o'tish shu kontakt bilan bog'langan raqamga 10 daqiqalik, 5 urinishli OTP kod yuboradi; kodni qayta so'rash 60 soniyada bir martadan cheklangan. Telegram webhook xususiy chatdagi va jo'natuvchining o'ziga tegishli kontaktlarni qabul qiladi. Mavjud akkaunt egalari profilidan telefonini shu usulda tasdiqlashi mumkin.
+
+### Hudud filtrlari va ijara beruvchi kabineti
+
+Viloyat, shahar va tumanlar ro'yxati migratsiya orqali bazaga yuklanadi; ma'lumotlar 14 ta viloyat/respublika/shahar va 209 ta shahar/tuman yozuvini o'z ichiga oladi. Manba: [`Ibratbek/regions-districts-json`](https://github.com/Ibratbek/regions-districts-json). Eski e'lonlardagi taniladigan shahar qiymatlari migratsiyada mos hududga bog'lanadi.
+
+Telefon tasdiqlangan foydalanuvchi profilidagi **Ijara beruvchi sifatida ro'yxatdan o'tish** tugmasini tanlab, shu akkauntini ijara beruvchi profiliga aylantiradi. Qayta foydalanuvchi akkaunti yaratilmaydi. Keyin e'lon turini, hududini, manzil va shartlarini to'ldirib, 10 tagacha rasmni yuklashi mumkin. E'lon darhol faol bo'ladi; boshqarish yoki moderatsiya zarur bo'lsa, admin paneldagi `Faol` belgisidan foydalaning.
+
+**Admin bilan bog'lanish** formasi xabarlarni `Admin → Bog'lanish xabarlari` bo'limida saqlaydi. Yangi xabarlar `Ko'rildi` belgisi bilan boshqariladi.
+
 ### Rentora AI va e'lon rasmlari
 
 AI yordamchini yoqish uchun OpenAI API kalitini `.env` fayliga kiriting:
@@ -70,7 +106,7 @@ OPENAI_MODEL=gpt-4o-mini
 
 AI faqat ijara e'lonlarini filtrlash/saralash va narxdan muddat bo'yicha jami summani hisoblashga mo'ljallangan. So'rov matni mezonlarni aniqlash uchun OpenAI API'ga yuboriladi; ijara narxi serverda bazadagi narx asosida hisoblanadi. Kalitni repoga qo'shmang.
 
-Yangi e'lon qo'shishda admin paneldagi "E'lon rasmlari" bo'limidan 10 tagacha rasm faylini yuklang (har biri 10 MB gacha). Mahalliy ishlab chiqishda rasmlar `startapp/media/` ichida saqlanadi. Production'da `MEDIA_ROOT` uchun doimiy disk yoki Django storage-compatible object storage sozlang.
+Admin yangi e'lonida yoki ijara beruvchi kabinetida 10 tagacha haqiqiy rasm faylini yuklang (har biri 10 MB gacha). E'lon sahifasidagi asosiy rasm yoki kichik rasmlarni bosib, klaviaturadagi chap/o'ng tugmalarda galereyani ko'ring. Admin paneldagi rasm preview'ini bosib faylni alohida ochish mumkin. Mahalliy ishlab chiqishda rasmlar `startapp/media/` ichida saqlanadi. Production'da `MEDIA_ROOT` uchun doimiy disk yoki Django storage-compatible object storage sozlang.
 
 ### Onlayn to'lov
 
@@ -105,11 +141,12 @@ Testlar bosh sahifa va til tanlagichni, filtrlarni, ro'yxatdan o'tishni, naqd br
 | GET | `/health/` | Server holati | Ochiq |
 | GET | `/api/listings/` | E'lonlar ro'yxati | Ochiq |
 | GET | `/api/listings/<id>/` | E'lon tafsiloti | Ochiq |
+| GET | `/api/locations/districts/?region_id=<id>` | Tanlangan viloyat shahar/tumanlari | Ochiq |
 | GET | `/api/bookings/` | Joriy foydalanuvchining bronlari | Login kerak |
 | POST | `/api/bookings/` | Bron yaratish | Login kerak |
 | POST | `/api/bookings/<id>/cancel/` | O'z bronini bekor qilish | Login kerak |
 
-E'lon filtrlari: `kind=home` yoki `kind=car`, `city=Toshkent`, `q=...`, `check_in=YYYY-MM-DD`, `check_out=YYYY-MM-DD`. Masalan: `/api/listings/?kind=car&city=Toshkent`.
+E'lon filtrlari: `kind=home` yoki `kind=car`, `city=Toshkent`, `region=<id>`, `district=<id>`, `q=...`, `check_in=YYYY-MM-DD`, `check_out=YYYY-MM-DD`. Masalan: `/api/listings/?kind=car&region=14` yoki `/api/listings/?region=14&district=218`.
 
 API Django session autentifikatsiyasi va CSRF himoyasidan foydalanadi.
 
