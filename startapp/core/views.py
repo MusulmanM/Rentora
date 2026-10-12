@@ -1,0 +1,242 @@
+from datetime import date
+
+from django.contrib import messages
+from django.contrib.auth import login
+from django.contrib.auth.decorators import login_required
+from django.contrib.auth.views import LoginView
+from django.views import View
+from rest_framework import viewsets
+from django.core.exceptions import ValidationError
+from django.db import transaction
+from django.db.models import Q
+from django.http import JsonResponse
+from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
+from django.views.decorators.http import require_GET, require_POST
+from rest_framework import status
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.response import Response
+
+from .forms import BookingForm, RegistrationForm, homeForm, carForm
+from .models import Booking, RentalListing, home, car
+from .serializers import BookingSerializer, ListingSerializer, homeSerializer, carSerializer
+
+
+
+def _parse_date(value):
+    try:
+        return date.fromisoformat(value) if value else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _available_for_dates(queryset, check_in, check_out):
+    if check_in and check_out and check_out > check_in:
+        unavailable_ids = Booking.objects.filter(
+            status__in=[Booking.Status.PENDING, Booking.Status.CONFIRMED],
+            check_in__lt=check_out,
+            check_out__gt=check_in,
+        ).values_list("listing_id", flat=True)
+        return queryset.exclude(id__in=unavailable_ids)
+    return queryset
+
+
+def home(request):
+    listings = RentalListing.objects.filter(is_active=True)
+    kind = request.GET.get("kind", "")
+    city = request.GET.get("city", "").strip()
+    query = request.GET.get("q", "").strip()
+    check_in_raw = request.GET.get("check_in", "")
+    check_out_raw = request.GET.get("check_out", "")
+    check_in = _parse_date(check_in_raw)
+    check_out = _parse_date(check_out_raw)
+    guests_raw = request.GET.get("guests", "1")
+    try:
+        guests = max(1, min(int(guests_raw), 20))
+    except (TypeError, ValueError):
+        guests = 1
+
+    if kind in (RentalListing.Kind.HOME, RentalListing.Kind.CAR):
+        listings = listings.filter(kind=kind)
+    if city:
+        listings = listings.filter(city__icontains=city)
+    if query:
+        listings = listings.filter(Q(title__icontains=query) | Q(description__icontains=query) | Q(address__icontains=query) | Q(brand__icontains=query))
+    listings = listings.filter(capacity__gte=guests)
+    listings = _available_for_dates(listings, check_in, check_out)
+    listings = listings.order_by("-is_featured", "-created_at")
+
+    cities = RentalListing.objects.filter(is_active=True).order_by("city").values_list("city", flat=True).distinct()
+    context = {
+        "listings": listings,
+        "cities": cities,
+        "selected_kind": kind,
+        "selected_city": city,
+        "query": query,
+        "check_in": check_in_raw,
+        "check_out": check_out_raw,
+        "guests": guests,
+        "today": timezone.localdate().isoformat(),
+        "home_count": RentalListing.objects.filter(is_active=True, kind=RentalListing.Kind.HOME).count(),
+        "car_count": RentalListing.objects.filter(is_active=True, kind=RentalListing.Kind.CAR).count(),
+    }
+    return render(request, "core/home.html", context)
+
+
+class StartAppLoginView(LoginView):
+    template_name = "core/login.html"
+    redirect_authenticated_user = True
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["page_title"] = "Kirish"
+        return context
+
+
+def register(request):
+    if request.user.is_authenticated:
+        return redirect("my-bookings")
+    if request.method == "POST":
+        form = RegistrationForm(request.POST)
+        if form.is_valid():
+            user = form.save()
+            login(request, user)
+            messages.success(request, "Hisobingiz yaratildi. Xush kelibsiz!")
+            return redirect("home")
+    else:
+        form = RegistrationForm()
+    return render(request, "core/register.html", {"form": form})
+
+
+def listing_detail(request, slug):
+    listing = get_object_or_404(RentalListing, slug=slug, is_active=True)
+    initial = {}
+    for field in ("check_in", "check_out", "guests"):
+        if request.GET.get(field):
+            initial[field] = request.GET[field]
+    form = BookingForm(initial=initial, listing=listing, user=request.user if request.user.is_authenticated else None)
+    return render(request, "core/listing_detail.html", {"listing": listing, "form": form, "today": timezone.localdate().isoformat()})
+
+
+@login_required
+def create_booking(request, slug):
+    listing = get_object_or_404(RentalListing, slug=slug, is_active=True)
+    if request.method != "POST":
+        return redirect("listing-detail", slug=slug)
+    form = BookingForm(request.POST, listing=listing, user=request.user)
+    if form.is_valid():
+        try:
+            with transaction.atomic():
+                locked_listing = RentalListing.objects.select_for_update().filter(pk=listing.pk, is_active=True).first()
+                if locked_listing is None:
+                    messages.error(request, "Bu e'lon hozir faol emas.")
+                    return redirect("home")
+                booking = form.save(commit=False)
+                booking.user = request.user
+                booking.listing = locked_listing
+                booking.full_clean()
+                booking.save()
+            messages.success(request, "Bron muvaffaqiyatli yaratildi! Bron holati: kutilmoqda.")
+            return redirect("my-bookings")
+        except ValidationError as exc:
+            if hasattr(exc, "message_dict"):
+                for field, errors in exc.message_dict.items():
+                    for error in errors:
+                        form.add_error(field if field in form.fields else None, error)
+            else:
+                form.add_error(None, "; ".join(exc.messages))
+    return render(request, "core/listing_detail.html", {"listing": listing, "form": form, "today": timezone.localdate().isoformat()}, status=400)
+
+
+@login_required
+def my_bookings(request):
+    bookings = Booking.objects.filter(user=request.user).select_related("listing")
+    active_bookings_count = bookings.exclude(status=Booking.Status.CANCELLED).count()
+    return render(request, "core/my_bookings.html", {"bookings": bookings, "active_bookings_count": active_bookings_count})
+
+
+@login_required
+@require_POST
+def cancel_booking(request, booking_id):
+    booking = get_object_or_404(Booking, pk=booking_id, user=request.user)
+    if booking.status in (Booking.Status.PENDING, Booking.Status.CONFIRMED):
+        booking.status = Booking.Status.CANCELLED
+        booking.save(update_fields=["status", "updated_at"])
+        messages.success(request, f"#{booking.pk} bron bekor qilindi.")
+    else:
+        messages.info(request, "Bu bron avval bekor qilingan.")
+    return redirect("my-bookings")
+
+
+@require_GET
+def health(request):
+    return JsonResponse({"status": "ok", "app": "StartApp Rental", "time": timezone.now().isoformat()})
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def listings_api(request):
+    listings = RentalListing.objects.filter(is_active=True)
+    kind = request.query_params.get("kind")
+    city = request.query_params.get("city", "").strip()
+    query = request.query_params.get("q", "").strip()
+    if kind in (RentalListing.Kind.HOME, RentalListing.Kind.CAR):
+        listings = listings.filter(kind=kind)
+    if city:
+        listings = listings.filter(city__icontains=city)
+    if query:
+        listings = listings.filter(Q(title__icontains=query) | Q(description__icontains=query) | Q(brand__icontains=query))
+    check_in = _parse_date(request.query_params.get("check_in", ""))
+    check_out = _parse_date(request.query_params.get("check_out", ""))
+    listings = _available_for_dates(listings, check_in, check_out)
+    return Response(ListingSerializer(listings, many=True).data)
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def listing_detail_api(request, listing_id):
+    listing = get_object_or_404(RentalListing, pk=listing_id, is_active=True)
+    return Response(ListingSerializer(listing).data)
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsAuthenticated])
+def bookings_api(request):
+    if request.method == "GET":
+        bookings = Booking.objects.filter(user=request.user).select_related("listing")
+        return Response(BookingSerializer(bookings, many=True).data)
+    serializer = BookingSerializer(data=request.data, context={"request": request})
+    if serializer.is_valid():
+        booking = serializer.save()
+        return Response(BookingSerializer(booking).data, status=status.HTTP_201_CREATED)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def cancel_booking_api(request, booking_id):
+    booking = Booking.objects.filter(pk=booking_id, user=request.user).first()
+    if not booking:
+        return Response({"detail": "Bron topilmadi."}, status=status.HTTP_404_NOT_FOUND)
+    if booking.status == Booking.Status.CANCELLED:
+        return Response({"detail": "Bron avval bekor qilingan."}, status=status.HTTP_400_BAD_REQUEST)
+    booking.status = Booking.Status.CANCELLED
+    booking.save(update_fields=["status", "updated_at"])
+    return Response(BookingSerializer(booking).data)
+
+
+
+class HomeViewSet(viewsets.ModelViewSet):
+    serializer_class = homeSerializer
+    permission_classes = [AllowAny]
+
+    def get_queryset(self):
+        return home.objects.all()
+    
+class CarViewSet(viewsets.ModelViewSet):
+    serializer_class = carSerializer
+    permission_classes = [AllowAny]
+
+    def get_queryset(self):
+        return car.objects.all()
