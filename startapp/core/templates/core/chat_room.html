@@ -1,0 +1,42 @@
+{% extends 'core/base.html' %}
+{% load static core_tags %}
+{% block title %}{{ conversation.listing.title }} — Chat — Rentora{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'core/chat.css' %}">{% endblock %}
+{% block content %}
+<header class="site-header wrap"><a class="brand" href="{% url 'home' %}"><span class="brand-symbol"><i></i><i></i><i></i></span><span>Rentora</span></a><nav class="main-nav"><a href="{% url 'home' %}">Bosh sahifa</a><a href="{% url 'chat-inbox' %}">Chatlar</a></nav><div class="header-actions"><a class="nav-bookings" href="{% url 'listing-detail' conversation.listing.slug %}">{{ conversation.listing.title }}</a><a class="user-pill" href="{% url 'profile' %}">{{ request.user.first_name|default:request.user.username|first|upper }}</a></div></header>
+<main class="chat-page wrap">
+  <a class="back-link" href="{% url 'chat-inbox' %}">← Chatlar</a>
+  <section class="chat-room" data-chat-room data-messages-url="{% url 'chat-messages-api' conversation.pk %}">
+    <header class="chat-room-header"><div><p class="section-kicker">E'LON BO'YICHA SUHBAT</p><h1>{{ conversation.listing.title }}</h1><span>{% if conversation.customer_id == request.user.pk %}{{ conversation.provider.get_full_name|default:conversation.provider.username }}{% else %}{{ conversation.customer.get_full_name|default:conversation.customer.username }}{% endif %}</span></div><a href="{% url 'listing-detail' conversation.listing.slug %}">E'lonni ko'rish ↗</a></header>
+    <div class="chat-messages" data-chat-messages data-last-id="{{ latest_chat_message_id }}" aria-live="polite">
+      {% for message in chat_messages %}
+      <article class="chat-message{% if message.sender_id == request.user.pk %} is-mine{% endif %}" data-message-id="{{ message.pk }}">
+        <strong>{{ message.sender.get_full_name|default:message.sender.username }}</strong>
+        {% if message.text %}<p>{{ message.text|linebreaksbr }}</p>{% endif %}
+        {% if message.attachment %}
+          {% if message.attachment_type == 'image' %}<a href="{% url 'chat-media' message.pk %}" target="_blank" rel="noopener"><img src="{% url 'chat-media' message.pk %}" alt="Chat rasmi" loading="lazy"></a>
+          {% else %}<audio controls preload="metadata" src="{% url 'chat-media' message.pk %}">Brauzeringiz audio ijrosini qo'llamaydi.</audio>{% endif %}
+        {% endif %}
+        <time>{{ message.created_at|date:'d.m.Y H:i' }}</time>
+      </article>
+      {% endfor %}
+    </div>
+    <p class="chat-sync-status" data-chat-sync-status role="status" aria-live="polite"></p>
+    <form method="post" enctype="multipart/form-data" class="chat-compose" data-chat-form>
+      {% csrf_token %}
+      {% if form.non_field_errors %}<div class="form-error-box">{{ form.non_field_errors }}</div>{% endif %}
+      <label class="visually-hidden" for="{{ form.text.id_for_label }}">Xabar</label>{{ form.text }}
+      {% if form.text.errors %}<small class="field-error">{{ form.text.errors|striptags }}</small>{% endif %}
+      <div class="chat-compose-actions">
+        <label class="chat-file-label" for="{{ form.attachment.id_for_label }}">Rasm / audio tanlash</label>{{ form.attachment }}
+        <button type="button" class="btn btn-outline" data-record-audio>Ovoz yozish</button>
+        <span data-record-status aria-live="polite"></span>
+        <button type="submit" class="btn btn-dark">Yuborish ↑</button>
+      </div>
+      {% if form.attachment.errors %}<small class="field-error">{{ form.attachment.errors|striptags }}</small>{% endif %}
+      <p>Matn, rasm yoki 15 MB gacha audio yuborish mumkin.</p>
+    </form>
+  </section>
+</main>
+{% endblock %}
+{% block scripts %}<script src="{% static 'core/chat.js' %}" defer></script>{% endblock %}

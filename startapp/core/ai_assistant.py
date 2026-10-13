@@ -10,6 +10,7 @@ from django.db.models import Q
 from django.urls import reverse
 from django.utils import timezone
 
+from .availability import listings_visible_to
 from .models import Booking, BookingOrder, RentalListing
 
 logger = logging.getLogger(__name__)
@@ -18,7 +19,7 @@ _OPENAI_URL = "https://api.openai.com/v1/chat/completions"
 _SCHEMA = {
     "type": "object",
     "properties": {
-        "task": {"type": "string", "enum": ["search", "calculate", "search_and_calculate", "out_of_scope"]},
+        "task": {"type": "string", "enum": ["search", "calculate", "search_and_calculate", "support", "out_of_scope"]},
         "kind": {"type": ["string", "null"], "enum": ["home", "car", None]},
         "city": {"type": ["string", "null"]},
         "guests": {"type": ["integer", "null"]},
@@ -30,10 +31,13 @@ _SCHEMA = {
         "rental_days": {"type": ["integer", "null"]},
         "check_in": {"type": ["string", "null"]},
         "check_out": {"type": ["string", "null"]},
+        "support_answer": {"type": "string"},
+        "escalate": {"type": "boolean"},
     },
     "required": [
         "task", "kind", "city", "guests", "bedrooms", "min_price", "max_price",
         "listing_search", "sort_by", "rental_days", "check_in", "check_out",
+        "support_answer", "escalate",
     ],
     "additionalProperties": False,
 }
@@ -57,10 +61,15 @@ def _interpret_request(message):
             {
                 "role": "system",
                 "content": (
-                    "You are a narrowly scoped rental search parser for Rentora. "
-                    "Only classify and extract rental listing filters, listing sorting, or rental price calculations. "
-                    "Never answer unrelated questions. Set task=out_of_scope for anything else. "
-                    "Return only the schema fields. Prices are Uzbek som per day. "
+                    "You are Rentora's rental search and customer-support assistant. "
+                    "Classify each message as rental search/calculation, Rentora support, or out_of_scope. "
+                    "For support, answer only with these confirmed facts: users can browse homes and cars, "
+                    "filter listings, submit bookings, pay cash or use configured online checkout, and contact "
+                    "the provider from an owned listing. Providers review booking requests and mark handover. "
+                    "For account-specific, payment disputes, safety, legal, or unknown questions set escalate=true "
+                    "and do not invent an answer. Do not claim a human was contacted; the app will create an admin ticket. "
+                    "Never ask for passwords, OTP codes, or payment credentials. Do not answer unrelated questions; "
+                    "set task=out_of_scope. Return only the schema fields. Prices are Uzbek som per day. "
                     "Convert relative dates using today's date, which is " + today.isoformat() + ". "
                     "Set rental_days only when the user requests a rental duration or provides a valid date range. "
                     "Do not invent a city, budget, guests, bedrooms, listing, or dates."
@@ -84,7 +93,17 @@ def _interpret_request(message):
             result = json.loads(response.read())
     except HTTPError as exc:
         logger.warning("OpenAI rental assistant returned HTTP %s", exc.code)
-        raise RentalAssistantError("AI xizmati hozir so'rovni bajara olmadi.") from exc
+        messages = {
+            400: "OpenAI so'rovni rad etdi. OPENAI_MODEL qiymatini va model imkoniyatlarini tekshiring.",
+            401: "OPENAI_API_KEY noto'g'ri yoki bekor qilingan. Kalitni server sozlamalarida tekshiring.",
+            403: "OpenAI ushbu modelga kirishga ruxsat bermadi. Hisob va model ruxsatlarini tekshiring.",
+            404: "OPENAI_MODEL topilmadi. Model nomini server sozlamalarida tekshiring.",
+            429: "OpenAI limiti yoki krediti tugagan. Hisob billing va rate limit holatini tekshiring.",
+        }
+        raise RentalAssistantError(
+            messages.get(exc.code, "OpenAI xizmati so'rovni qabul qilmadi. Birozdan keyin qayta urinib ko'ring."),
+            status_code=503 if exc.code in {401, 403, 404, 429} else 502,
+        ) from exc
     except URLError as exc:
         logger.warning("OpenAI rental assistant connection failed: %s", exc.reason)
         raise RentalAssistantError("AI xizmatiga ulanib bo'lmadi. Birozdan keyin qayta urinib ko'ring.") from exc
@@ -109,6 +128,12 @@ def _interpret_request(message):
 def _validated_criteria(criteria):
     if criteria.get("task") == "out_of_scope":
         return None
+    if criteria.get("task") == "support":
+        answer = criteria.get("support_answer", "")
+        escalate = criteria.get("escalate", False)
+        if not isinstance(answer, str) or len(answer) > 1500 or not isinstance(escalate, bool):
+            raise RentalAssistantError("AI yordam javobi noto'g'ri formatda.")
+        return {"task": "support", "support_answer": answer.strip(), "escalate": escalate}
     if criteria.get("task") not in {"search", "calculate", "search_and_calculate"}:
         raise RentalAssistantError("AI qidiruv mezonlarini aniqlay olmadi.")
 
@@ -171,15 +196,35 @@ def _validated_criteria(criteria):
     return validated
 
 
-def find_rentals(message):
+def find_rentals(message, user=None):
     criteria = _validated_criteria(_interpret_request(message))
     if criteria is None:
         return {
             "message": "Men faqat ijara e'lonlarini filtrlash, narx bo'yicha saralash va ijara summasini hisoblashda yordam beraman.",
             "results": [],
         }
+    if criteria["task"] == "support":
+        if criteria["escalate"]:
+            from .models import ContactMessage
 
-    listings = RentalListing.objects.filter(is_active=True).select_related("region", "district").prefetch_related("images")
+            authenticated = bool(getattr(user, "is_authenticated", False))
+            ContactMessage.objects.create(
+                user=user if authenticated else None,
+                name=(user.get_full_name() or user.get_username()) if authenticated else "Sayt foydalanuvchisi",
+                email=(user.email or "") if authenticated else "",
+                subject="AI yordam so'rovi",
+                message=message,
+            )
+            answer = criteria["support_answer"] or "Savolingiz adminlarga yuborildi."
+            answer += " Savolingiz administratorlar navbatiga yuborildi."
+        else:
+            answer = criteria["support_answer"] or "Rentora bo'yicha yordam so'rovingizni aniqlay olmadim."
+        return {"message": answer, "results": [], "escalated": criteria["escalate"]}
+
+    listings = listings_visible_to(
+        user,
+        RentalListing.objects.select_related("region", "district").prefetch_related("images"),
+    )
     if criteria["kind"]:
         listings = listings.filter(kind=criteria["kind"])
     if criteria["city"]:
@@ -211,7 +256,9 @@ def find_rentals(message):
         )
     if criteria["check_in"] and criteria["check_out"]:
         unavailable_ids = Booking.objects.filter(
-            status__in=[Booking.Status.PENDING, Booking.Status.CONFIRMED],
+            status__in=[
+                Booking.Status.PENDING, Booking.Status.CONFIRMED, Booking.Status.HANDED_OVER,
+            ],
             check_in__lt=criteria["check_out"],
             check_out__gt=criteria["check_in"],
         ).values_list("listing_id", flat=True)

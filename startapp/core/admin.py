@@ -6,7 +6,7 @@ from django.utils.html import format_html
 
 from .models import (
     Booking, BookingOrder, ContactMessage, District, HostProfile, ListingImage, PaymentTransaction,
-    RentalListing, UserProfile, home, car,
+    RentalListing, UserProfile, Conversation,
 )
 from .forms import DistrictSelect
 
@@ -82,14 +82,14 @@ class RentalListingAdminForm(forms.ModelForm):
 class RentalListingAdmin(admin.ModelAdmin):
     form = RentalListingAdminForm
     inlines = (ListingImageInline,)
-    list_display = ("title", "kind", "city", "region", "district", "owner", "price_per_day", "is_featured", "is_active")
-    list_filter = ("kind", "region", "district", "is_featured", "is_active")
+    list_display = ("title", "kind", "city", "region", "district", "owner", "price_per_day", "availability_status", "is_featured", "is_active")
+    list_filter = ("kind", "region", "district", "availability_status", "is_featured", "is_active")
     search_fields = ("title", "title_ru", "title_en", "city", "address", "description", "description_ru", "description_en", "brand")
     fieldsets = (
         ("E'lon (o'zbekcha)", {"fields": ("kind", "title", "owner", "region", "district", "city", "address", "description")} ),
         ("Translations / Tarjimalar", {"fields": ("title_ru", "description_ru", "title_en", "description_en"), "classes": ("collapse",)}),
         ("Ijara shartlari", {"fields": ("price_per_day", "capacity", "bedrooms", "bathrooms", "brand", "transmission", "year")} ),
-        ("Holat", {"fields": ("slug", "is_featured", "is_active")} ),
+        ("Holat", {"fields": ("slug", "availability_status", "is_featured", "is_active")} ),
     )
     list_editable = ("is_featured", "is_active")
     prepopulated_fields = {"slug": ("title",)}
@@ -145,28 +145,8 @@ class PaymentTransactionAdmin(admin.ModelAdmin):
     search_fields = ("provider_transaction_id", "booking_order__reference", "booking_order__user__username")
     readonly_fields = tuple(field.name for field in PaymentTransaction._meta.fields)
 
-
-
-@admin.register(home)
-class HomeAdmin(admin.ModelAdmin):
-    list_display = ("title", "city", "price_per_day", "is_featured", "is_active")
-    list_filter = ("city", "is_featured", "is_active")
-    search_fields = ("title", "description", "city", "address")
-    fieldsets = (
-        ("E'lon (o'zbekcha)", {"fields": ("title", "city", "address", "description")} ),
-        ("Ijara shartlari", {"fields": ("price_per_day", "capacity", "bedrooms", "bathrooms", "image_url")} ),
-        ("Holat", {"fields": ("slug", "is_featured", "is_active")} ),
-    )
-    list_editable = ("is_featured", "is_active")
-    prepopulated_fields = {"slug": ("title",)}
-
-
-@admin.register(car)
-class CarAdmin(admin.ModelAdmin):
-    list_display = ("name", "brand", "year", "price")
-    list_filter = ("brand", "year")
-    search_fields = ("name", "brand", "description")
-    fieldsets = (
-        ("Avtomobil (o'zbekcha)", {"fields": ("name", "brand", "year", "description")} ),
-        ("Narx va holat", {"fields": ("price",)} ),
-    )
+@admin.register(Conversation)
+class ConversationAdmin(admin.ModelAdmin):
+    list_display = ("listing", "customer", "provider", "updated_at")
+    search_fields = ("listing__title", "customer__username", "provider__username")
+    readonly_fields = tuple(field.name for field in Conversation._meta.fields)

@@ -15,12 +15,14 @@ Interfeys o'zbek (`UZ`), rus (`RU`) va ingliz (`EN`) tillarida mavjud. Yuqori qi
 - Profil ichidan ijara beruvchi sifatida alohida yoqilish va shu hisob bilan e'lon joylash.
 - Saytdagi admin bilan bog'lanish formasi; yuborilgan xabarlar Django admin panelida saqlanadi.
 - Naqd bronni darhol saqlash; Click/karta yoki Payme tanlanganda mijozni buyurtmadan so'ng darhol onlayn to'lovga yo'naltirish.
-- Provayder to'lovi tasdiqlanmaguncha bron yozilmaydi; muvaffaqiyatli callback bronni tasdiqlaydi va sanalarni band qiladi.
+- Onlayn to'lov tasdiqlanmaguncha bron so'rovi yaratilmaydi; muvaffaqiyatli callback provayder tasdig'ini kutayotgan bronni yaratadi va sanalarni band qiladi.
 - Bron va buyurtmalarni bekor qilish; kutilayotgan buyurtmalar sanalarni boshqa mijozlardan vaqtincha band qiladi.
-- Bron holatlari: kutilmoqda, tasdiqlangan yoki bekor qilingan.
+- Bron holatlari: kutilmoqda, tasdiqlangan, mijozga topshirilgan yoki bekor qilingan.
 - Django admin orqali e'lonlar, bronlar va to'lov yozuvlarini ko'rish hamda nom va tavsiflarning ruscha/inglizcha versiyalarini saqlash.
 - E'lon yaratishda 10 tagacha rasm faylini yuklash, admin panelda preview ko'rish va e'lon sahifasida galereyani modal oynada ko'rish.
-- Rentora AI tabiiy tildagi ijara so'rovlarini filtrlash, saralash va muddat bo'yicha ijara narxini hisoblash bilan cheklanadi.
+- Rentora AI ijara so'rovlarini filtrlash, saralash va narx hisoblash bilan birga Rentora bo'yicha savollarga ham javob beradi.
+- Ijara beruvchi bron so'rovlarini tasdiqlaydi, mahsulotni topshirilgan deb belgilaydi va e'lonni Faol/Remont holatiga o'tkazadi.
+- Mijoz va ijaraga beruvchi saytdagi chatda matn, rasm va ovozli xabar yuborishi mumkin.
 - JSON REST API va `/health/` health endpoint.
 - Telefon, planshet va desktop ekranlariga mos dizayn.
 - Demo uchun 8 ta uy/avtomobil e'lonini yaratadigan seed buyrug'i.
@@ -34,9 +36,10 @@ Interfeys o'zbek (`UZ`), rus (`RU`) va ingliz (`EN`) tillarida mavjud. Yuqori qi
 
 ## Windows'da ishga tushirish
 
-PowerShell terminalini loyiha papkasida oching. Quyidagi buyruqlar bilan qo'lda ishga tushirish yoki `start_windows.bat` faylini ochib avtomatik sozlash mumkin:
+PowerShell terminalini repository root papkasida oching va `manage.py` joylashgan Django loyiha papkasiga kiring. Quyidagi buyruqlar bilan qo'lda ishga tushirish yoki `startapp\start_windows.bat` faylini ochib avtomatik sozlash mumkin:
 
 ```powershell
+Set-Location .\startapp
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
@@ -52,6 +55,7 @@ Agar Python 3.12 o'rnatilmagan bo'lsa, `py -3.13` yoki mos o'rnatilgan Python ve
 ### Git Bash terminali
 
 ```bash
+cd startapp
 py -3.12 -m venv .venv
 source .venv/Scripts/activate
 python -m pip install -r requirements.txt
@@ -61,11 +65,11 @@ python manage.py createsuperuser
 python manage.py runserver
 ```
 
-Ixtiyoriy ravishda `.env.example` faylidan `.env` nusxa oling va qiymatlarni o'zgartiring.
+Ixtiyoriy ravishda `startapp` ichida `Copy-Item .env.example .env` buyrug'i bilan `.env` nusxa oling va qiymatlarni o'zgartiring.
 
 ### Telegram OTP va telefonni tasdiqlash
 
-BotFather orqali Telegram bot yarating va quyidagi o'zgaruvchilarni `.env` fayliga kiriting:
+BotFather orqali Telegram bot yarating va `startapp\.env` fayliga quyidagi o'zgaruvchilarni kiriting (`startapp` ichidagi `.env` bo'lmasa, repository rootidagi `.env` ham o'qiladi):
 
 ```dotenv
 TELEGRAM_BOT_TOKEN=
@@ -73,27 +77,28 @@ TELEGRAM_BOT_USERNAME=
 TELEGRAM_WEBHOOK_SECRET=
 ```
 
-`TELEGRAM_WEBHOOK_SECRET` uchun 32 yoki undan uzun tasodifiy harf-raqamli qiymat ishlating. Sayt ommaviy HTTPS domenida bo'lishi shart. Webhook'ni Telegram'ga bir marta ro'yxatdan o'tkazing (`<...>` qiymatlarni hosting ma'lumotlari bilan almashtiring):
+`TELEGRAM_WEBHOOK_SECRET` uchun 32 yoki undan uzun tasodifiy harf-raqamli qiymat ishlating. Sayt ommaviy HTTPS domenida bo'lishi shart. `.env` ichidagi `DJANGO_ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS` va `PUBLIC_SITE_URL` qiymatlarida domeningizni ko'rsating. Repository root papkasidan webhook'ni sozlang:
 
 ```powershell
-$payload = @{
-  url = "https://<domen>/telegram/webhook/"
-  secret_token = $env:TELEGRAM_WEBHOOK_SECRET
-}
-Invoke-RestMethod -Method Post -Uri "https://api.telegram.org/bot$env:TELEGRAM_BOT_TOKEN/setWebhook" -Body $payload
+Set-Location .\startapp
+python manage.py set_telegram_webhook https://<ngrok-yoki-sayt-domeni>/telegram/webhook/
 ```
 
-Buyruqdan oldin terminalda `.env` faylingizdagi `TELEGRAM_BOT_TOKEN` va `TELEGRAM_WEBHOOK_SECRET` qiymatlarini `$env:TELEGRAM_BOT_TOKEN` hamda `$env:TELEGRAM_WEBHOOK_SECRET` environment o'zgaruvchilariga kiriting.
+Webhook buyrug'i bot tokeni va secret'ni Django sozlamalaridan oladi; ularni terminal buyrug'iga yoki chatga yozmang. PowerShell'da vaqtinchalik environment o'zgaruvchisi kerak bo'lsa, sintaksis `$env:DJANGO_ALLOWED_HOSTS = "127.0.0.1,localhost,<domen>"`; `DJANGO_ALLOWED_HOSTS=...` ko'rinishidagi oddiy yozuv PowerShell buyrug'i emas. `.env` o'zgargach Django serverini qayta ishga tushiring; ngrok domeni o'zgarsa webhook'ni ham qayta sozlang.
 
-`TELEGRAM_BOT_USERNAME` bot havolasidagi `@` belgisiz nomdir. Foydalanuvchi avval botni ochib `/start` yuboradi va bot so'ragan Telegram kontaktini o'zi ulashadi. Saytdagi ro'yxatdan o'tish shu kontakt bilan bog'langan raqamga 10 daqiqalik, 5 urinishli OTP kod yuboradi; kodni qayta so'rash 60 soniyada bir martadan cheklangan. Telegram webhook xususiy chatdagi va jo'natuvchining o'ziga tegishli kontaktlarni qabul qiladi. Mavjud akkaunt egalari profilidan telefonini shu usulda tasdiqlashi mumkin.
+`TELEGRAM_BOT_USERNAME` bot havolasidagi `@` belgisiz nomdir. Foydalanuvchi avval botni ochib `/start` yuboradi va bot so'ragan Telegram kontaktini o'zi ulashadi. Saytdagi ro'yxatdan o'tish shu kontakt bilan bog'langan raqamga 10 daqiqalik, 5 urinishli OTP kod yuboradi; kodni qayta so'rash 60 soniyada bir martadan cheklangan. Telegram webhook xususiy chatdagi va jo'natuvchining o'ziga tegishli kontaktlarni qabul qiladi. Mavjud akkaunt egalari profilidan telefonini shu usulda tasdiqlashi mumkin. Bron yuborilganda, tasdiqlanganda, bekor qilinganda va mahsulot topshirilganda mijoz hamda ijaraga beruvchiga rasm (ommaviy HTTPS manzili bo'lsa), nom, narx, muddat, jami summa va so'rov vaqti yuboriladi. Xabar olish uchun ikkala tomon ham oldin botga `/start` yuborgan bo'lishi kerak.
 
 ### Hudud filtrlari va ijara beruvchi kabineti
 
 Viloyat, shahar va tumanlar ro'yxati migratsiya orqali bazaga yuklanadi; ma'lumotlar 14 ta viloyat/respublika/shahar va 209 ta shahar/tuman yozuvini o'z ichiga oladi. Manba: [`Ibratbek/regions-districts-json`](https://github.com/Ibratbek/regions-districts-json). Eski e'lonlardagi taniladigan shahar qiymatlari migratsiyada mos hududga bog'lanadi.
 
-Telefon tasdiqlangan foydalanuvchi profilidagi **Ijara beruvchi sifatida ro'yxatdan o'tish** tugmasini tanlab, shu akkauntini ijara beruvchi profiliga aylantiradi. Qayta foydalanuvchi akkaunti yaratilmaydi. Keyin e'lon turini, hududini, manzil va shartlarini to'ldirib, 10 tagacha rasmni yuklashi mumkin. E'lon darhol faol bo'ladi; boshqarish yoki moderatsiya zarur bo'lsa, admin paneldagi `Faol` belgisidan foydalaning.
+Telefon tasdiqlangan foydalanuvchi profilidagi **Ijara beruvchi sifatida ro'yxatdan o'tish** tugmasini tanlab, shu akkauntini ijara beruvchi profiliga aylantiradi. Qayta foydalanuvchi akkaunti yaratilmaydi. Keyin e'lon turini, hududini, manzil va shartlarini to'ldirib, 10 tagacha rasmni yuklashi mumkin. Ijara beruvchi kabinetidan e'lonni **Faol** yoki **Remont** holatiga o'tkazish mumkin; remontdagi e'lon katalogda ko'rinmaydi. E'lon egasi o'z mahsulotini bron qila olmaydi.
 
-**Admin bilan bog'lanish** formasi xabarlarni `Admin → Bog'lanish xabarlari` bo'limida saqlaydi. Yangi xabarlar `Ko'rildi` belgisi bilan boshqariladi.
+Bron so'rovida bosilgan sana/vaqt va narx saqlanadi. Naqd buyurtma ijaraga beruvchiga darhol so'rov bo'lib boradi; online buyurtma to'lovdan keyin so'rovga aylanadi. Ijaraga beruvchi avval **Tasdiqlayman**, keyin mijozga topshirganda **Mahsulot ijaraga topshirildi** tugmasini bosadi. Faol bron qilingan e'lon boshqa foydalanuvchilardan yashiriladi; bekor qilinsa yoki `check_out` muddati o'tsa qayta ko'rinadi.
+
+Foydalanuvchilar e'lon sahifasidan telefon, Telegram yoki sayt chat orqali bog'lanishi mumkin. Chat matn, rasm, audio fayl va brauzer/mikrofon qo'llasa yozib olingan ovozli xabarni qo'llaydi. Chat fayllari `CHAT_MEDIA_ROOT` da (standart: `startapp/private-chat-media`) saqlanadi va faqat chat qatnashchilariga ko'rinadi; bu papkani web-serverda ommaviy media sifatida nashr qilmang.
+
+**Admin bilan bog'lanish** formasi va AI eskalatsiya qilgan savollar `Admin → Bog'lanish xabarlari` bo'limida saqlanadi. Yangi xabarlar `Ko'rildi` belgisi bilan boshqariladi.
 
 ### Rentora AI va e'lon rasmlari
 
@@ -104,7 +109,7 @@ OPENAI_API_KEY=
 OPENAI_MODEL=gpt-4o-mini
 ```
 
-AI barcha sahifalarda past-o'ng burchakdagi suzuvchi chat orqali ochiladi va faqat ijara e'lonlarini filtrlash/saralash hamda narxdan muddat bo'yicha jami summani hisoblashga mo'ljallangan. Suhbat xabarlari va mos e'lonlar chat oynasida ko'rsatiladi; Enter xabarni yuboradi. So'rov matni mezonlarni aniqlash uchun OpenAI API'ga yuboriladi; ijara narxi serverda bazadagi narx asosida hisoblanadi. `OPENAI_API_KEY` bo'lmasa, chat sozlanmagan holatini va ma'mur uchun konfiguratsiya ko'rsatmasini ko'rsatadi. Kalitni repoga qo'shmang.
+AI barcha sahifalarda past-o'ng burchakdagi suzuvchi chat orqali ochiladi; u ijara qidiruvi/saralashi, narx hisob-kitobi va Rentora yordam savollariga javob beradi, murakkab savolni administratorlar navbatiga yuboradi. Ijara narxi serverda bazadagi narx asosida hisoblanadi. HTTP 401, 403, 404, 429 va so'rov xatolari foydalanuvchiga alohida tushuntiriladi. `.env` `startapp` papkasidan yoki repository rootidan yuklanadi. `OPENAI_API_KEY` bo'lmasa yoki yaroqsiz bo'lsa, yordamchi sozlash/xato ko'rsatmasini beradi. Kalitni repoga qo'shmang.
 
 Admin yangi e'lonida yoki ijara beruvchi kabinetida 10 tagacha haqiqiy rasm faylini yuklang (har biri 10 MB gacha). E'lon sahifasidagi asosiy rasm yoki kichik rasmlarni bosib, klaviaturadagi chap/o'ng tugmalarda galereyani ko'ring. Admin paneldagi rasm preview'ini bosib faylni alohida ochish mumkin. Mahalliy ishlab chiqishda rasmlar `startapp/media/` ichida saqlanadi. Production'da `MEDIA_ROOT` uchun doimiy disk yoki Django storage-compatible object storage sozlang.
 

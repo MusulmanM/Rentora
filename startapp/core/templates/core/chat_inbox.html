@@ -1,0 +1,20 @@
+{% extends 'core/base.html' %}
+{% load static core_tags %}
+{% block title %}Chatlar — Rentora{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'core/chat.css' %}">{% endblock %}
+{% block content %}
+<header class="site-header wrap"><a class="brand" href="{% url 'home' %}"><span class="brand-symbol"><i></i><i></i><i></i></span><span>Rentora</span></a><nav class="main-nav"><a href="{% url 'home' %}">Bosh sahifa</a><a class="nav-active" href="{% url 'chat-inbox' %}">Chatlar</a></nav><div class="header-actions">{% include 'core/language_switcher.html' %}<a class="user-pill" href="{% url 'profile' %}">{{ request.user.first_name|default:request.user.username|first|upper }}</a></div></header>
+<main class="chat-page wrap">
+  <p class="section-kicker">ALOQA</p><h1>Chatlar</h1>
+  <div class="chat-inbox">
+    {% for conversation in conversations %}
+    <a class="chat-inbox-item" href="{% url 'chat-room' conversation.pk %}">
+      <div><strong>{{ conversation.listing.title }}</strong><span>{% if conversation.customer_id == request.user.pk %}{{ conversation.provider.get_full_name|default:conversation.provider.username }}{% else %}{{ conversation.customer.get_full_name|default:conversation.customer.username }}{% endif %}</span></div>
+      <span class="chat-inbox-time">{{ conversation.updated_at|date:'d.m.Y H:i' }}</span>
+    </a>
+    {% empty %}
+    <div class="chat-empty"><h2>Hozircha chat yo'q</h2><p>E'lon sahifasidan ijaraga beruvchi bilan suhbatni boshlang.</p><a class="btn btn-dark" href="{% url 'home' %}">E'lonlarni ko'rish</a></div>
+    {% endfor %}
+  </div>
+</main>
+{% endblock %}
