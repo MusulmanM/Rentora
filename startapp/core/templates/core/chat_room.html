@@ -1,16 +1,16 @@
 {% extends 'core/base.html' %}
 {% load static core_tags %}
 {% block title %}{{ conversation.listing.title }} — Chat — Rentora{% endblock %}
-{% block extra_head %}<link rel="stylesheet" href="{% static 'core/chat.css' %}">{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'core/chat.css' %}?v=20261013-nav5">{% endblock %}
 {% block content %}
-<header class="site-header wrap"><a class="brand" href="{% url 'home' %}"><span class="brand-symbol"><i></i><i></i><i></i></span><span>Rentora</span></a><nav class="main-nav"><a href="{% url 'home' %}">Bosh sahifa</a><a href="{% url 'chat-inbox' %}">Chatlar</a></nav><div class="header-actions"><a class="nav-bookings" href="{% url 'listing-detail' conversation.listing.slug %}">{{ conversation.listing.title }}</a><a class="user-pill" href="{% url 'profile' %}">{{ request.user.first_name|default:request.user.username|first|upper }}</a></div></header>
+<header class="site-header wrap" data-unread-endpoint="{% url 'chat-unread-status' %}"><a class="brand" href="{% url 'home' %}"><span class="brand-symbol"><i></i><i></i><i></i></span><span>Rentora</span></a><nav class="main-nav" id="main-nav"><a href="{% url 'home' %}">Bosh sahifa</a><a href="{% url 'chat-inbox' %}">Chatlar<span class="unread-dot" data-unread-indicator role="img" aria-label="O'qilmagan yangi xabarlar"{% if not has_unread_chat_messages %} hidden{% endif %}></span></a><a href="{% url 'my-bookings' %}">Bronlarim</a></nav><div class="header-actions">{% include 'core/language_switcher.html' %}<a class="nav-bookings" href="{% url 'listing-detail' conversation.listing.slug %}">{{ conversation.listing.title }}</a><a class="user-pill" href="{% url 'profile' %}">{{ request.user.first_name|default:request.user.username|first|upper }}</a></div><button class="mobile-menu-button" data-menu-toggle aria-controls="main-nav" aria-label="Menyuni ochish" aria-expanded="false">☰</button></header>
 <main class="chat-page wrap">
   <a class="back-link" href="{% url 'chat-inbox' %}">← Chatlar</a>
   <section class="chat-room" data-chat-room data-messages-url="{% url 'chat-messages-api' conversation.pk %}">
     <header class="chat-room-header"><div><p class="section-kicker">E'LON BO'YICHA SUHBAT</p><h1>{{ conversation.listing.title }}</h1><span>{% if conversation.customer_id == request.user.pk %}{{ conversation.provider.get_full_name|default:conversation.provider.username }}{% else %}{{ conversation.customer.get_full_name|default:conversation.customer.username }}{% endif %}</span></div><a href="{% url 'listing-detail' conversation.listing.slug %}">E'lonni ko'rish ↗</a></header>
     <div class="chat-messages" data-chat-messages data-last-id="{{ latest_chat_message_id }}" aria-live="polite">
       {% for message in chat_messages %}
-      <article class="chat-message{% if message.sender_id == request.user.pk %} is-mine{% endif %}" data-message-id="{{ message.pk }}">
+      <article class="chat-message{% if message.sender_id == request.user.pk %} is-mine{% endif %}" data-message-id="{{ message.pk }}" data-no-translate="true">
         <strong>{{ message.sender.get_full_name|default:message.sender.username }}</strong>
         {% if message.text %}<p>{{ message.text|linebreaksbr }}</p>{% endif %}
         {% if message.attachment %}
@@ -39,4 +39,4 @@
   </section>
 </main>
 {% endblock %}
-{% block scripts %}<script src="{% static 'core/chat.js' %}" defer></script>{% endblock %}
+{% block scripts %}<script src="{% static 'core/chat.js' %}?v=20261013-nav5" defer></script>{% endblock %}

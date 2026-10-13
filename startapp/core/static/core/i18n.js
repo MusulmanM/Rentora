@@ -182,6 +182,44 @@
     ["Jami bronlar", "Всего бронирований", "Total bookings"],
     ["Kutilmoqda / tasdiqlangan", "Ожидают / подтверждены", "Pending / confirmed"],
     ["Bron holati o'zgarsa, shu sahifadan kuzatishingiz mumkin.", "Здесь можно следить за изменением статуса бронирования.", "You can track booking status updates on this page."],
+    ["Chatlar", "Чаты", "Chats"],
+    ["Admin bilan bog'lanish", "Связаться с администратором", "Contact an administrator"],
+    ["Profil", "Профиль", "Profile"],
+    ["O'qilmagan yangi xabarlar", "Новые непрочитанные сообщения", "New unread messages"],
+    ["Menyuni ochish", "Открыть меню", "Open menu"],
+    ["Menyuni yopish", "Закрыть меню", "Close menu"],
+    ["Salom! Ijara qidiruvi, narx hisob-kitobi va Rentora bo'yicha savollarda yordam beraman. Murakkab masalani administratorlarga yuboraman.", "Здравствуйте! Помогу с поиском аренды, расчётом стоимости и вопросами о Rentora. Сложные вопросы передам администраторам.", "Hello! I can help with rental searches, price calculations, and Rentora questions. I'll forward complex issues to the administrators."],
+    ["Ijara qidiruvi, saralash, narx hisob-kitobi va Rentora yordami.", "Поиск аренды, фильтрация, расчёт стоимости и помощь Rentora.", "Rental search, filtering, price calculation, and Rentora help."],
+    ["Ovoz yozish", "Записать голосовое", "Record voice"],
+    ["Yozishni to'xtatish", "Остановить запись", "Stop recording"],
+    ["Ovoz tayyorlanmoqda…", "Подготовка аудио…", "Preparing audio…"],
+    ["Ovozli xabar yuborishga tayyor.", "Голосовое сообщение готово к отправке.", "Voice message is ready to send."],
+    ["Ovoz yozilmoqda…", "Идёт запись…", "Recording…"],
+    ["Mikrofonga ruxsat berilmadi. Audio fayl tanlashingiz mumkin.", "Нет доступа к микрофону. Вы можете выбрать аудиофайл.", "Microphone access was denied. You can choose an audio file."],
+    ["Yangi xabarlar yuklanmadi", "Не удалось загрузить новые сообщения", "New messages could not be loaded"],
+    ["OpenAI so'rovni rad etdi. OPENAI_MODEL qiymatini va model imkoniyatlarini tekshiring.", "OpenAI отклонил запрос. Проверьте значение OPENAI_MODEL и возможности модели.", "OpenAI rejected the request. Check OPENAI_MODEL and the model's capabilities."],
+    ["OPENAI_API_KEY noto'g'ri yoki bekor qilingan. Kalitni server sozlamalarida tekshiring.", "OPENAI_API_KEY неверен или отозван. Проверьте ключ в настройках сервера.", "OPENAI_API_KEY is invalid or revoked. Check the key in server settings."],
+    ["OpenAI ushbu modelga kirishga ruxsat bermadi. Hisob va model ruxsatlarini tekshiring.", "OpenAI не разрешил доступ к этой модели. Проверьте учётную запись и разрешения модели.", "OpenAI denied access to this model. Check account and model permissions."],
+    ["OPENAI_MODEL topilmadi. Model nomini server sozlamalarida tekshiring.", "OPENAI_MODEL не найден. Проверьте имя модели в настройках сервера.", "OPENAI_MODEL was not found. Check the model name in server settings."],
+    ["OpenAI limiti yoki krediti tugagan. Hisob billing va rate limit holatini tekshiring.", "Лимит или кредит OpenAI исчерпан. Проверьте оплату и ограничения запросов.", "The OpenAI limit or credits are exhausted. Check billing and rate limits."],
+    ["OpenAI xizmati so'rovni qabul qilmadi. Birozdan keyin qayta urinib ko'ring.", "Сервис OpenAI не принял запрос. Попробуйте позже.", "OpenAI did not accept the request. Please try again later."],
+    ["AI yordam javobi noto'g'ri formatda.", "Ответ помощника ИИ имеет неверный формат.", "The AI assistant reply has an invalid format."],
+    ["AI so'rovini bajarib bo'lmadi.", "Не удалось выполнить запрос к ИИ.", "The AI request could not be completed."],
+    ["So'rov JSON formatida bo'lishi kerak.", "Запрос должен быть в формате JSON.", "The request must be in JSON format."],
+    ["Qidiruv matni yuborilmadi.", "Текст для поиска не отправлен.", "No search text was sent."],
+    ["So'rov 1–500 ta belgidan iborat bo'lishi kerak.", "Запрос должен содержать от 1 до 500 символов.", "The request must contain 1–500 characters."],
+    ["Savolingiz administratorlar navbatiga yuborildi.", "Ваш вопрос отправлен в очередь администраторов.", "Your question was sent to the administrators' queue."],
+    ["Savolingiz adminlarga yuborildi.", "Ваш вопрос отправлен администраторам.", "Your question was sent to the administrators."],
+    ["Rentora bo'yicha yordam so'rovingizni aniqlay olmadim.", "Не удалось определить ваш вопрос о Rentora.", "I couldn't determine your Rentora support question."],
+    ["Chatga ulanish uzildi. Xabarlar qayta yuklanmoqda.", "Соединение с чатом потеряно. Повторная загрузка сообщений…", "Chat connection was lost. Retrying message sync…"],
+    ["Chat rasmi", "Изображение в чате", "Chat image"],
+    ["E'LON BO'YICHA SUHBAT", "ОБСУЖДЕНИЕ ОБЪЯВЛЕНИЯ", "LISTING CONVERSATION"],
+    ["E'lonni ko'rish ↗", "Открыть объявление ↗", "View listing ↗"],
+    ["Xabar", "Сообщение", "Message"],
+    ["Rasm / audio tanlash", "Выбрать фото / аудио", "Choose image / audio"],
+    ["Yuborish ↑", "Отправить ↑", "Send ↑"],
+    ["Matn, rasm yoki 15 MB gacha audio yuborish mumkin.", "Можно отправить текст, изображение или аудио размером до 15 МБ.", "Send text, an image, or audio up to 15 MB."],
+    ["Brauzeringiz audio ijrosini qo'llamaydi.", "Ваш браузер не поддерживает воспроизведение аудио.", "Your browser does not support audio playback."],
     ["BOSHLANISH", "НАЧАЛО", "START"],
     ["TUGASH", "ОКОНЧАНИЕ", "END"],
     ["DAVOMIYLIGI", "ДЛИТЕЛЬНОСТЬ", "DURATION"],
@@ -310,6 +348,34 @@
     return result;
   }
 
+  function translateAddedNode(root) {
+    if (root.nodeType === Node.TEXT_NODE) {
+      const parent = root.parentElement;
+      if (!parent || parent.closest('[data-no-translate="true"]') || ['SCRIPT', 'STYLE', 'NOSCRIPT'].includes(parent.tagName)) return;
+      if (!originalText.has(root)) originalText.set(root, root.nodeValue);
+      root.nodeValue = translateText(originalText.get(root), currentLanguage);
+      return;
+    }
+    if (root.nodeType !== Node.ELEMENT_NODE || root.closest('[data-no-translate="true"]')) return;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let textNode;
+    while ((textNode = walker.nextNode())) translateAddedNode(textNode);
+    const elements = [root, ...root.querySelectorAll('*')];
+    const attributes = ['placeholder', 'title', 'aria-label', 'data-confirm'];
+    elements.forEach((element) => {
+      attributes.forEach((attribute) => {
+        if (!element.hasAttribute(attribute)) return;
+        let saved = originalAttributes.get(element);
+        if (!saved) {
+          saved = {};
+          originalAttributes.set(element, saved);
+        }
+        if (!(attribute in saved)) saved[attribute] = element.getAttribute(attribute);
+        element.setAttribute(attribute, translateText(saved[attribute], currentLanguage));
+      });
+    });
+  }
+
   function translateDocument(language) {
     currentLanguage = ['uz', 'ru', 'en'].includes(language) ? language : 'uz';
     document.documentElement.lang = currentLanguage;
@@ -388,5 +454,9 @@
       });
     });
     translateDocument(preferred);
+    const observer = new MutationObserver((records) => {
+      records.forEach((record) => record.addedNodes.forEach(translateAddedNode));
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
   });
 })();

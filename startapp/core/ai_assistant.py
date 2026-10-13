@@ -49,7 +49,7 @@ class RentalAssistantError(Exception):
         super().__init__(message)
 
 
-def _interpret_request(message):
+def _interpret_request(message, language="uz"):
     api_key = getattr(settings, "OPENAI_API_KEY", "")
     if not api_key:
         raise RentalAssistantError("AI qidiruv uchun OPENAI_API_KEY sozlanmagan.", status_code=503)
@@ -72,7 +72,9 @@ def _interpret_request(message):
                     "set task=out_of_scope. Return only the schema fields. Prices are Uzbek som per day. "
                     "Convert relative dates using today's date, which is " + today.isoformat() + ". "
                     "Set rental_days only when the user requests a rental duration or provides a valid date range. "
-                    "Do not invent a city, budget, guests, bedrooms, listing, or dates."
+                    "Do not invent a city, budget, guests, bedrooms, listing, or dates. "
+                    f"Write any user-facing support_answer in this language: {language} "
+                    "(uz=Uzbek, ru=Russian, en=English). Keep task, filters, dates, and all schema values unchanged."
                 ),
             },
             {"role": "user", "content": message},
@@ -196,8 +198,8 @@ def _validated_criteria(criteria):
     return validated
 
 
-def find_rentals(message, user=None):
-    criteria = _validated_criteria(_interpret_request(message))
+def find_rentals(message, user=None, language="uz"):
+    criteria = _validated_criteria(_interpret_request(message, language=language))
     if criteria is None:
         return {
             "message": "Men faqat ijara e'lonlarini filtrlash, narx bo'yicha saralash va ijara summasini hisoblashda yordam beraman.",

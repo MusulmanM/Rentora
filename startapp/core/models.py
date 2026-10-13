@@ -454,6 +454,8 @@ class Conversation(models.Model):
     provider = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="provider_conversations",
     )
+    customer_last_read_message_id = models.PositiveBigIntegerField(default=0)
+    provider_last_read_message_id = models.PositiveBigIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

@@ -4,16 +4,25 @@
   const menuToggle = document.querySelector('[data-menu-toggle]');
   const nav = document.querySelector('#main-nav');
   if (menuToggle && nav) {
+    const updateMenuLabel = () => {
+      const source = nav.classList.contains('menu-open') ? 'Menyuni yopish' : 'Menyuni ochish';
+      const language = window.startAppLanguage || 'uz';
+      const label = window.startAppTranslate ? window.startAppTranslate(source, language) : source;
+      menuToggle.setAttribute('aria-label', label);
+    };
     menuToggle.addEventListener('click', () => {
       const opened = nav.classList.toggle('menu-open');
       menuToggle.setAttribute('aria-expanded', String(opened));
       menuToggle.textContent = opened ? '×' : '☰';
+      updateMenuLabel();
     });
     nav.querySelectorAll('a').forEach((link) => link.addEventListener('click', () => {
       nav.classList.remove('menu-open');
       menuToggle.setAttribute('aria-expanded', 'false');
       menuToggle.textContent = '☰';
+      updateMenuLabel();
     }));
+    window.addEventListener('startapp:languagechange', updateMenuLabel);
   }
 
   document.querySelectorAll('form[data-confirm]').forEach((form) => {
