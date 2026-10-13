@@ -3,7 +3,7 @@
 {% block content %}
 <header class="site-header wrap">
   <a class="brand" href="{% url 'home' %}"><span class="brand-symbol"><i></i><i></i><i></i></span><span>Rentora</span></a>
-  <nav class="main-nav"><a href="{% url 'home' %}">Bosh sahifa</a><a href="{% url 'my-bookings' %}">Bronlarim</a><a class="nav-active" href="{% url 'profile' %}">Profil</a></nav>
+  <nav class="main-nav"><a href="{% url 'home' %}">Bosh sahifa</a><a href="{% url 'chat-inbox' %}">Chatlar</a><a href="{% url 'my-bookings' %}">Bronlarim</a><a class="nav-active" href="{% url 'profile' %}">Profil</a></nav>
   <div class="header-actions">{% include 'core/language_switcher.html' %}<a class="user-pill" href="{% url 'profile' %}" aria-label="Profil">{{ request.user.first_name|default:request.user.username|first|upper }}</a></div>
 </header>
 <main class="bookings-main wrap">

@@ -2,19 +2,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from rest_framework import serializers
 
-from .models import Booking, BookingOrder, RentalListing, home, car
-
-
-class homeSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = home
-        fields = ["id", "name", "address", "price", "description", "created_at"]
-
-
-class carSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = car
-        fields = ["id", "name", "brand", "year", "price", "description", "created_at"]
+from .models import Booking, BookingOrder, RentalListing
 
 
 class ListingSerializer(serializers.ModelSerializer):
@@ -65,6 +53,11 @@ class BookingSerializer(serializers.ModelSerializer):
             return attrs
         if not listing.is_active:
             raise serializers.ValidationError({"listing": "Bu e'lon hozir faol emas."})
+        if listing.availability_status != RentalListing.AvailabilityStatus.ACTIVE:
+            raise serializers.ValidationError({"listing": "Bu e'lon hozir remontda."})
+        request = self.context.get("request")
+        if request and listing.owner_id == request.user.pk:
+            raise serializers.ValidationError({"listing": "O'zingiz joylagan e'lonni bron qila olmaysiz."})
         if check_out <= check_in:
             raise serializers.ValidationError({"check_out": "Tugash sanasi boshlanish sanasidan keyin bo'lishi kerak."})
         from django.utils import timezone
@@ -76,7 +69,9 @@ class BookingSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"guests": f"Eng ko'p sig'im: {listing.capacity}."})
         conflicts = Booking.objects.filter(
             listing=listing,
-            status__in=[Booking.Status.PENDING, Booking.Status.CONFIRMED],
+            status__in=[
+                Booking.Status.PENDING, Booking.Status.CONFIRMED, Booking.Status.HANDED_OVER,
+            ],
             check_in__lt=check_out,
             check_out__gt=check_in,
         )
@@ -97,7 +92,11 @@ class BookingSerializer(serializers.ModelSerializer):
         listing = validated_data.pop("listing")
         payment_method = validated_data.get("payment_method", Booking.PaymentMethod.CASH)
         with transaction.atomic():
-            listing = RentalListing.objects.select_for_update().filter(pk=listing.pk, is_active=True).first()
+            listing = RentalListing.objects.select_for_update().filter(
+                pk=listing.pk,
+                is_active=True,
+                availability_status=RentalListing.AvailabilityStatus.ACTIVE,
+            ).first()
             if listing is None:
                 raise serializers.ValidationError({"listing": "Bu e'lon hozir faol emas."})
             model = Booking if payment_method == Booking.PaymentMethod.CASH else BookingOrder

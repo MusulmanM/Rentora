@@ -5,11 +5,12 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-try:
-    from dotenv import load_dotenv
-    load_dotenv(BASE_DIR / ".env")
-except ImportError:
-    pass
+from dotenv import load_dotenv
+
+load_dotenv(BASE_DIR / ".env")
+load_dotenv(BASE_DIR.parent / ".env")
+CHAT_MEDIA_ROOT = Path(os.environ.get("CHAT_MEDIA_ROOT", BASE_DIR / "private-chat-media"))
+PUBLIC_SITE_URL = os.environ.get("PUBLIC_SITE_URL", "").rstrip("/")
 
 SECRET_KEY = os.environ.get(
     "DJANGO_SECRET_KEY",
@@ -19,6 +20,9 @@ DEBUG = os.environ.get("DJANGO_DEBUG", "1").strip().lower() in {"1", "true", "ye
 ALLOWED_HOSTS = [host.strip() for host in os.environ.get(
     "DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost,testserver"
 ).split(",") if host.strip()]
+CSRF_TRUSTED_ORIGINS = [origin.strip() for origin in os.environ.get(
+    "CSRF_TRUSTED_ORIGINS", ""
+).split(",") if origin.strip()]
 CLICK_SERVICE_ID = os.environ.get("CLICK_SERVICE_ID", "")
 CLICK_MERCHANT_ID = os.environ.get("CLICK_MERCHANT_ID", "")
 CLICK_SECRET_KEY = os.environ.get("CLICK_SECRET_KEY", "")

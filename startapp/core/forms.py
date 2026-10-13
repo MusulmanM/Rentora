@@ -8,8 +8,8 @@ from django.utils import timezone
 from PIL import Image, UnidentifiedImageError
 
 from .models import (
-    Booking, BookingOrder, ContactMessage, District, HostProfile, PendingPhoneVerification,
-    PendingRegistration, Region, RentalListing, UserProfile, home, car,
+    Booking, BookingOrder, ChatMessage, ContactMessage, District, HostProfile,
+    PendingPhoneVerification, PendingRegistration, Region, RentalListing, UserProfile,
 )
 
 User = get_user_model()
@@ -128,6 +128,10 @@ class BookingForm(forms.ModelForm):
 
     def clean(self):
         cleaned = super().clean()
+        if self.listing and self.listing.owner_id == getattr(self.user, "pk", None):
+            self.add_error(None, "O'zingiz joylagan e'lonni bron qila olmaysiz.")
+        if self.listing and self.listing.availability_status != RentalListing.AvailabilityStatus.ACTIVE:
+            self.add_error(None, "Bu e'lon hozir remontda.")
         start = cleaned.get("check_in")
         end = cleaned.get("check_out")
         guests = cleaned.get("guests")
@@ -142,7 +146,9 @@ class BookingForm(forms.ModelForm):
         if start and end and end > start and self.listing:
             conflicts = Booking.objects.filter(
                 listing=self.listing,
-                status__in=[Booking.Status.PENDING, Booking.Status.CONFIRMED],
+                status__in=[
+                    Booking.Status.PENDING, Booking.Status.CONFIRMED, Booking.Status.HANDED_OVER,
+                ],
                 check_in__lt=end,
                 check_out__gt=start,
             )
@@ -261,6 +267,8 @@ class HostOnboardingForm(forms.ModelForm):
 
 
 class ContactMessageForm(forms.ModelForm):
+    email = forms.EmailField(required=False, label="Elektron pochta")
+
     class Meta:
         model = ContactMessage
         fields = ("name", "email", "subject", "message")
@@ -273,22 +281,53 @@ class ContactMessageForm(forms.ModelForm):
         }
 
 
-class homeForm(forms.ModelForm):
+class ListingAvailabilityForm(forms.Form):
+    status = forms.ChoiceField(
+        choices=RentalListing.AvailabilityStatus.choices,
+        label="E'lon holati",
+        widget=forms.Select(attrs={"class": "form-input"}),
+    )
+
+
+class ChatMessageForm(forms.ModelForm):
+    attachment = forms.FileField(
+        required=False,
+        label="Rasm yoki ovozli xabar",
+        widget=forms.ClearableFileInput(attrs={"class": "form-input", "accept": "image/*,audio/*"}),
+    )
+
     class Meta:
-        model = home
-        fields = ["title", "city", "address", "description", "price_per_day", "capacity", "bedrooms", "bathrooms", "image_url"]
-        labels = {
-            "title": "Nomi", 
-            "city": "Shahar", 
-            "address": "Manzil", 
-            "price_per_day": "Kunlik narx", 
-            "description": "Tavsif"
-        }
+        model = ChatMessage
+        fields = ("text",)
+        labels = {"text": "Xabar"}
+        widgets = {"text": forms.TextInput(attrs={
+            "class": "form-input", "maxlength": 5000, "placeholder": "Xabaringizni yozing",
+        })}
 
-
-
-class carForm(forms.ModelForm):
-    class Meta:
-        model = car
-        fields = ("name", "brand", "year", "price", "description")
-        labels = {"name": "Nomi", "brand": "Brend", "year": "Yil", "price": "Narx", "description": "Tavsif"}
+    def clean(self):
+        cleaned = super().clean()
+        text = (cleaned.get("text") or "").strip()
+        attachment = cleaned.get("attachment")
+        if not text and not attachment:
+            raise ValidationError("Xabar matni yoki rasm/ovozli fayl yuboring.")
+        if attachment:
+            if attachment.size > 15 * 1024 * 1024:
+                raise ValidationError("Rasm yoki ovozli xabar 15 MB dan oshmasligi kerak.")
+            extension = attachment.name.rsplit(".", 1)[-1].lower() if "." in attachment.name else ""
+            if extension in {"jpg", "jpeg", "png", "webp", "gif"}:
+                try:
+                    with Image.open(attachment) as image:
+                        if image.width * image.height > 40_000_000:
+                            raise ValidationError("Rasm o'lchami juda katta.")
+                        image.verify()
+                except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError):
+                    raise ValidationError("Faqat haqiqiy rasm faylini yuboring.")
+                finally:
+                    attachment.seek(0)
+                cleaned["attachment_type"] = ChatMessage.AttachmentType.IMAGE
+            elif extension in {"ogg", "oga", "opus", "mp3", "wav", "m4a", "aac", "webm"}:
+                cleaned["attachment_type"] = ChatMessage.AttachmentType.AUDIO
+            else:
+                raise ValidationError("Faqat rasm yoki audio xabar yuborish mumkin.")
+        cleaned["text"] = text
+        return cleaned

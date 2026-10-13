@@ -6,6 +6,7 @@ import json
 from io import StringIO
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
+from urllib.error import HTTPError
 
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
@@ -19,11 +20,14 @@ from PIL import Image
 from rest_framework.test import APIClient
 
 from .admin import ListingImageForm, ListingImageInlineFormSet
+from .ai_assistant import RentalAssistantError, _interpret_request
 from .forms import RentalListingForm
 from .models import (
-    Booking, BookingOrder, ContactMessage, District, HostProfile, ListingImage,
-    PendingRegistration, Region, RentalListing, TelegramAccount, UserProfile,
+    Booking, BookingOrder, ChatMessage, ContactMessage, Conversation, District,
+    HostProfile, ListingImage, PendingRegistration, Region, RentalListing,
+    TelegramAccount, UserProfile,
 )
+from .telegram import notify_booking_parties
 
 User = get_user_model()
 
@@ -101,6 +105,18 @@ class WebsiteTests(StartAppBaseTest):
         self.assertContains(response, "data-gallery-dialog")
         self.assertContains(response, "core/listing-gallery.js")
 
+    def test_repair_listing_is_hidden_from_home_api_and_detail(self):
+        self.home.availability_status = RentalListing.AvailabilityStatus.REPAIR
+        self.home.save(update_fields=["availability_status"])
+        self.assertNotContains(self.client.get(reverse("home")), "Test apartment")
+        api_response = self.client.get(reverse("api-listings"))
+        self.assertEqual(api_response.status_code, 200)
+        self.assertNotIn(self.home.pk, [item["id"] for item in api_response.json()])
+        self.assertEqual(
+            self.client.get(reverse("listing-detail", args=[self.home.slug])).status_code,
+            404,
+        )
+
     def test_health_endpoint(self):
         response = self.client.get(reverse("health"))
         self.assertEqual(response.status_code, 200)
@@ -145,6 +161,45 @@ class WebsiteTests(StartAppBaseTest):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["results"], [])
         self.assertIn("faqat", response.json()["message"])
+
+    def test_ai_support_answers_known_question_without_creating_admin_ticket(self):
+        with patch("core.ai_assistant._interpret_request", return_value={
+            "task": "support", "support_answer": "Bronni ijaraga beruvchi tasdiqlaydi.", "escalate": False,
+        }):
+            response = self.client.post(
+                reverse("ai-rental-search"),
+                data=json.dumps({"message": "Bronimni kim tasdiqlaydi?"}),
+                content_type="application/json",
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("tasdiqlaydi", response.json()["message"])
+        self.assertFalse(response.json()["escalated"])
+        self.assertFalse(ContactMessage.objects.exists())
+
+    def test_ai_support_escalates_unknown_question_to_admin_inbox(self):
+        with patch("core.ai_assistant._interpret_request", return_value={
+            "task": "support", "support_answer": "Administrator ko'rib chiqadi.", "escalate": True,
+        }):
+            response = self.client.post(
+                reverse("ai-rental-search"),
+                data=json.dumps({"message": "To'lovim bo'yicha yordam kerak."}),
+                content_type="application/json",
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["escalated"])
+        ticket = ContactMessage.objects.get()
+        self.assertEqual(ticket.subject, "AI yordam so'rovi")
+        self.assertEqual(ticket.message, "To'lovim bo'yicha yordam kerak.")
+        self.assertIsNone(ticket.user)
+
+    @override_settings(OPENAI_API_KEY="test-openai-key")
+    def test_ai_error_identifies_rate_limit_without_exposing_provider_payload(self):
+        error = HTTPError("https://api.openai.com", 429, "Too Many Requests", {}, BytesIO(b"private response"))
+        with patch("core.ai_assistant.urlopen", side_effect=error):
+            with self.assertRaises(RentalAssistantError) as raised:
+                _interpret_request("Toshkentda uy top")
+        self.assertIn("billing", str(raised.exception))
+        self.assertNotIn("private response", str(raised.exception))
 
     @override_settings(OPENAI_API_KEY="")
     def test_ai_rental_search_reports_missing_api_key(self):
@@ -521,6 +576,18 @@ class BookingTests(StartAppBaseTest):
         self.assertEqual(booking.payment_method, Booking.PaymentMethod.CASH)
         self.assertEqual(BookingOrder.objects.count(), 0)
 
+    def test_listing_owner_cannot_book_own_listing(self):
+        self.home.owner = self.user
+        self.home.save(update_fields=["owner"])
+        self.client.force_login(self.user)
+        response = self.client.post(reverse("create-booking", args=[self.home.slug]), {
+            "check_in": self.tomorrow.isoformat(), "check_out": self.day_after.isoformat(),
+            "guests": 2, "payment_method": "cash",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(Booking.objects.count(), 0)
+        self.assertEqual(BookingOrder.objects.count(), 0)
+
     @override_settings(
         CLICK_SERVICE_ID="service-test",
         CLICK_MERCHANT_ID="merchant-test",
@@ -722,6 +789,142 @@ class BookingTests(StartAppBaseTest):
         self.assertEqual(response.status_code, 404)
         booking.refresh_from_db()
         self.assertEqual(booking.status, Booking.Status.PENDING)
+
+
+class ProviderWorkflowTests(StartAppBaseTest):
+    def setUp(self):
+        super().setUp()
+        self.provider = User.objects.create_user(username="provider", password="test-pass")
+        HostProfile.objects.create(user=self.provider, display_name="Provider")
+        self.home.owner = self.provider
+        self.home.save(update_fields=["owner"])
+        self.booking = Booking.objects.create(
+            user=self.user, listing=self.home, check_in=self.tomorrow,
+            check_out=self.day_after, guests=2,
+        )
+
+    def test_provider_must_accept_before_marking_listing_handed_over(self):
+        self.client.force_login(self.provider)
+        confirm_url = reverse("provider-booking-action", args=[self.booking.pk, "confirm"])
+        handover_url = reverse("provider-booking-action", args=[self.booking.pk, "handover"])
+        response = self.client.post(handover_url)
+        self.assertRedirects(response, reverse("provider-dashboard"))
+        self.booking.refresh_from_db()
+        self.assertEqual(self.booking.status, Booking.Status.PENDING)
+
+        response = self.client.post(confirm_url)
+        self.assertRedirects(response, reverse("provider-dashboard"))
+        self.booking.refresh_from_db()
+        self.assertEqual(self.booking.status, Booking.Status.CONFIRMED)
+
+        response = self.client.post(handover_url)
+        self.assertRedirects(response, reverse("provider-dashboard"))
+        self.booking.refresh_from_db()
+        self.assertEqual(self.booking.status, Booking.Status.HANDED_OVER)
+
+    def test_booking_is_hidden_from_other_users_but_visible_to_renter_and_owner(self):
+        outsider = User.objects.create_user(username="other-user", password="test-pass")
+        self.client.force_login(outsider)
+        self.assertNotContains(self.client.get(reverse("home")), "Test apartment")
+        self.assertEqual(
+            self.client.get(reverse("listing-detail", args=[self.home.slug])).status_code,
+            404,
+        )
+        public_listings = self.client.get(reverse("api-listings")).json()
+        self.assertNotIn(self.home.pk, [item["id"] for item in public_listings])
+        self.assertEqual(
+            self.client.get(reverse("api-listing-detail", args=[self.home.pk])).status_code,
+            404,
+        )
+        self.client.force_login(self.user)
+        self.assertEqual(
+            self.client.get(reverse("listing-detail", args=[self.home.slug])).status_code,
+            200,
+        )
+        self.assertEqual(
+            self.client.get(reverse("api-listing-detail", args=[self.home.pk])).status_code,
+            200,
+        )
+        self.client.force_login(self.provider)
+        self.assertEqual(
+            self.client.get(reverse("listing-detail", args=[self.home.slug])).status_code,
+            200,
+        )
+
+    def test_non_owner_cannot_change_listing_availability(self):
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse("provider-listing-availability", args=[self.home.pk]),
+            {"status": RentalListing.AvailabilityStatus.REPAIR},
+        )
+        self.assertEqual(response.status_code, 404)
+        self.home.refresh_from_db()
+        self.assertEqual(self.home.availability_status, RentalListing.AvailabilityStatus.ACTIVE)
+
+    def test_booking_telegram_notice_includes_listing_image_price_duration_total_and_link(self):
+        self.home.legacy_image_url = "https://rentora.example/listing.jpg"
+        self.home.save(update_fields=["legacy_image_url"])
+        for user, phone, telegram_id in (
+            (self.user, "+998901234567", "1001"),
+            (self.provider, "+998901234568", "1002"),
+        ):
+            account = TelegramAccount.objects.create(
+                phone_number=phone, telegram_user_id=telegram_id, chat_id=telegram_id,
+            )
+            UserProfile.objects.create(user=user, phone_number=phone, telegram_account=account)
+        with patch("core.telegram._call") as telegram_call:
+            notify_booking_parties(self.booking.pk, "requested", "https://rentora.example")
+        self.assertEqual(telegram_call.call_count, 2)
+        for call in telegram_call.call_args_list:
+            method, payload = call.args
+            self.assertEqual(method, "sendPhoto")
+            self.assertIn("Test apartment", payload["caption"])
+            self.assertIn("250,000 so'm / kun", payload["caption"])
+            self.assertIn("2 kun", payload["caption"])
+            self.assertIn("500,000 so'm", payload["caption"])
+            self.assertIn("Bron so'rovi:", payload["caption"])
+            self.assertIn("https://rentora.example/listing/test-apartment", payload["caption"])
+
+
+class ChatTests(StartAppBaseTest):
+    def setUp(self):
+        super().setUp()
+        self.provider = User.objects.create_user(username="provider", password="test-pass")
+        HostProfile.objects.create(user=self.provider, display_name="Provider")
+        self.home.owner = self.provider
+        self.home.save(update_fields=["owner"])
+        self.conversation = Conversation.objects.create(
+            listing=self.home, customer=self.user, provider=self.provider,
+        )
+
+    def test_conversation_participants_can_exchange_text_messages(self):
+        self.client.force_login(self.user)
+        response = self.client.post(reverse("chat-room", args=[self.conversation.pk]), {
+            "text": "Salom, e'lon hali bo'shmi?",
+        })
+        self.assertRedirects(response, reverse("chat-room", args=[self.conversation.pk]))
+        self.assertEqual(ChatMessage.objects.get().text, "Salom, e'lon hali bo'shmi?")
+        messages_response = self.client.get(
+            reverse("chat-messages-api", args=[self.conversation.pk]), {"after": 0},
+        )
+        self.assertEqual(messages_response.status_code, 200)
+        self.assertTrue(messages_response.json()["messages"][0]["mine"])
+        self.client.force_login(self.provider)
+        self.assertContains(self.client.get(reverse("chat-room", args=[self.conversation.pk])), "Salom")
+
+    def test_non_participant_cannot_read_chat_or_media(self):
+        message = ChatMessage.objects.create(
+            conversation=self.conversation, sender=self.user, text="Private",
+            attachment="chat/private/image.png", attachment_type=ChatMessage.AttachmentType.IMAGE,
+        )
+        outsider = User.objects.create_user(username="outsider", password="test-pass")
+        self.client.force_login(outsider)
+        self.assertEqual(self.client.get(reverse("chat-room", args=[self.conversation.pk])).status_code, 404)
+        self.assertEqual(
+            self.client.get(reverse("chat-messages-api", args=[self.conversation.pk])).status_code,
+            404,
+        )
+        self.assertEqual(self.client.get(reverse("chat-media", args=[message.pk])).status_code, 404)
 
 
 class ApiTests(StartAppBaseTest):

@@ -64,12 +64,15 @@ def _create_booking_from_paid_order(order):
             guests=order.guests,
             payment_method=order.payment_method,
             total_price=order.total_price,
-            status=Booking.Status.CONFIRMED,
+            status=Booking.Status.PENDING,
+            requested_at=order.created_at,
         )
         booking.full_clean()
         booking.save()
         order.booking = booking
         order.save(update_fields=["booking"])
+        from .telegram import notify_booking_parties
+        transaction.on_commit(lambda: notify_booking_parties(booking.pk, "requested"))
         return booking
 
 

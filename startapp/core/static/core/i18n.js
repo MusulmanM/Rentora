@@ -92,6 +92,7 @@
     ["Men faqat ijara e'lonlarini filtrlash, narx bo'yicha saralash va ijara summasini hisoblashda yordam beraman.", "Я помогаю только фильтровать и сортировать объявления аренды и рассчитывать её стоимость.", "I only help filter and sort rental listings and calculate rental costs."],
     ["AI qidiruv uchun OPENAI_API_KEY sozlanmagan.", "Для поиска с ИИ не настроен OPENAI_API_KEY.", "OPENAI_API_KEY is not configured for AI search."],
     ["AI xizmati hozir so'rovni bajara olmadi.", "Сервис ИИ сейчас не смог обработать запрос.", "The AI service could not process the request right now."],
+    ["Savolingiz ustida ishlayapman…", "Обрабатываю ваш запрос…", "Working on your request…"],
     ["AI xizmatiga ulanib bo'lmadi. Birozdan keyin qayta urinib ko'ring.", "Не удалось подключиться к сервису ИИ. Попробуйте позже.", "Could not connect to the AI service. Please try again later."],
     ["AI xizmatidan noto'g'ri javob olindi.", "Получен некорректный ответ от сервиса ИИ.", "The AI service returned an invalid response."],
     ["AI qidiruv mezonlarini aniqlay olmadi.", "ИИ не смог определить критерии поиска.", "The AI could not determine the search criteria."],

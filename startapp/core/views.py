@@ -2,6 +2,7 @@ from datetime import date
 from datetime import timedelta
 import json
 import logging
+import mimetypes
 import secrets
 
 from django.conf import settings
@@ -13,29 +14,31 @@ from django.contrib.auth.hashers import check_password, make_password
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Q
-from django.http import JsonResponse
+from django.http import FileResponse, Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
-from rest_framework import status, viewsets
+from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
+from .availability import ACTIVE_BOOKING_STATUSES, active_bookings, can_view_listing, listings_visible_to
 from .forms import (
-    BookingForm, ContactMessageForm, HostOnboardingForm, PhoneNumberForm, RegistrationForm,
-    RegistrationOTPForm, RentalListingForm, homeForm, carForm, normalize_phone_number,
+    BookingForm, ChatMessageForm, ContactMessageForm, HostOnboardingForm,
+    ListingAvailabilityForm, PhoneNumberForm, RegistrationForm, RegistrationOTPForm,
+    RentalListingForm, normalize_phone_number,
 )
 from .models import (
     Booking, BookingOrder, District, HostProfile, PendingRegistration,
     PendingPhoneVerification, Region, RentalListing, ListingImage, TelegramAccount,
-    UserProfile, home, car,
+    UserProfile, Conversation, ChatMessage,
 )
 from .payments import payment_url
-from .serializers import BookingSerializer, ListingSerializer, homeSerializer, carSerializer
+from .serializers import BookingSerializer, ListingSerializer
 from .ai_assistant import RentalAssistantError, find_rentals
-from .telegram import TelegramError, request_contact, send_message
+from .telegram import TelegramError, notify_booking_parties, request_contact, send_message
 
 
 logger = logging.getLogger(__name__)
@@ -57,7 +60,7 @@ def _parse_date(value):
 def _available_for_dates(queryset, check_in, check_out):
     if check_in and check_out and check_out > check_in:
         unavailable_ids = Booking.objects.filter(
-            status__in=[Booking.Status.PENDING, Booking.Status.CONFIRMED],
+            status__in=ACTIVE_BOOKING_STATUSES,
             check_in__lt=check_out,
             check_out__gt=check_in,
         ).values_list("listing_id", flat=True)
@@ -80,7 +83,10 @@ def _record_otp_delivery(account, now):
 
 
 def home(request):
-    listings = RentalListing.objects.filter(is_active=True).select_related("region", "district").prefetch_related("images")
+    listings = listings_visible_to(
+        request.user,
+        RentalListing.objects.select_related("region", "district").prefetch_related("images"),
+    )
     kind = request.GET.get("kind", "")
     city = request.GET.get("city", "").strip()
     region = None
@@ -137,8 +143,8 @@ def home(request):
         "check_out": check_out_raw,
         "guests": guests,
         "today": timezone.localdate().isoformat(),
-        "home_count": RentalListing.objects.filter(is_active=True, kind=RentalListing.Kind.HOME).count(),
-        "car_count": RentalListing.objects.filter(is_active=True, kind=RentalListing.Kind.CAR).count(),
+        "home_count": listings_visible_to(request.user).filter(kind=RentalListing.Kind.HOME).count(),
+        "car_count": listings_visible_to(request.user).filter(kind=RentalListing.Kind.CAR).count(),
     }
     return render(request, "core/home.html", context)
 
@@ -543,9 +549,14 @@ def telegram_webhook(request):
                 logger.warning("Telegram could not send a contact validation message.")
             return JsonResponse({"ok": True})
         try:
+            telegram_username = str(sender.get("username", "")).strip().lstrip("@")[:64]
             account, _ = TelegramAccount.objects.get_or_create(
                 phone_number=phone_number,
-                defaults={"telegram_user_id": str(telegram_user_id), "chat_id": str(chat_id)},
+                defaults={
+                    "telegram_user_id": str(telegram_user_id),
+                    "chat_id": str(chat_id),
+                    "telegram_username": telegram_username,
+                },
             )
         except IntegrityError:
             account = TelegramAccount.objects.filter(phone_number=phone_number).first()
@@ -553,6 +564,9 @@ def telegram_webhook(request):
             account.telegram_user_id == str(telegram_user_id)
             and account.chat_id == str(chat_id)
         ):
+            if telegram_username and account.telegram_username != telegram_username:
+                account.telegram_username = telegram_username
+                account.save(update_fields=["telegram_username"])
             response_text = "Telefon raqamingiz bog'landi. Endi Rentora saytida ro'yxatdan o'tishingiz mumkin."
         else:
             response_text = "Bu Telegram hisobi yoki telefon raqami boshqa akkauntga bog'langan."
@@ -570,17 +584,37 @@ def telegram_webhook(request):
     return JsonResponse({"ok": True})
 
 
+def _listing_detail_context(request, listing, form):
+    current_booking = active_bookings().filter(listing=listing).select_related("user").first()
+    owner_profile = UserProfile.objects.filter(
+        user_id=listing.owner_id,
+    ).select_related("telegram_account").first() if listing.owner_id else None
+    return {
+        "listing": listing, "form": form, "today": timezone.localdate().isoformat(),
+        "current_booking": current_booking,
+        "can_book_listing": (
+            listing.availability_status == RentalListing.AvailabilityStatus.ACTIVE
+            and current_booking is None
+            and not (request.user.is_authenticated and listing.owner_id == request.user.pk)
+        ),
+        "owner_profile": owner_profile,
+    }
+
+
 def listing_detail(request, slug):
     listing = get_object_or_404(
         RentalListing.objects.select_related("region", "district").prefetch_related("images"),
-        slug=slug, is_active=True,
+        slug=slug,
     )
-    initial = {}
-    for field in ("check_in", "check_out", "guests"):
-        if request.GET.get(field):
-            initial[field] = request.GET[field]
+    if not can_view_listing(request.user, listing):
+        raise Http404
+    initial = {
+        field: request.GET[field]
+        for field in ("check_in", "check_out", "guests")
+        if request.GET.get(field)
+    }
     form = BookingForm(initial=initial, listing=listing, user=request.user if request.user.is_authenticated else None)
-    return render(request, "core/listing_detail.html", {"listing": listing, "form": form, "today": timezone.localdate().isoformat()})
+    return render(request, "core/listing_detail.html", _listing_detail_context(request, listing, form))
 
 
 @login_required
@@ -588,11 +622,21 @@ def create_booking(request, slug):
     listing = get_object_or_404(RentalListing, slug=slug, is_active=True)
     if request.method != "POST":
         return redirect("listing-detail", slug=slug)
+    if listing.owner_id == request.user.pk:
+        messages.error(request, "O'zingiz joylagan e'lonni bron qila olmaysiz.")
+        return redirect("listing-detail", slug=slug)
+    if listing.availability_status != RentalListing.AvailabilityStatus.ACTIVE:
+        messages.error(request, "Bu e'lon hozir remontda.")
+        return redirect("home")
     form = BookingForm(request.POST, listing=listing, user=request.user)
     if form.is_valid():
         try:
             with transaction.atomic():
-                locked_listing = RentalListing.objects.select_for_update().filter(pk=listing.pk, is_active=True).first()
+                locked_listing = RentalListing.objects.select_for_update().filter(
+                    pk=listing.pk,
+                    is_active=True,
+                    availability_status=RentalListing.AvailabilityStatus.ACTIVE,
+                ).first()
                 if locked_listing is None:
                     messages.error(request, "Bu e'lon hozir faol emas.")
                     return redirect("home")
@@ -616,6 +660,9 @@ def create_booking(request, slug):
                     order.full_clean()
                     order.save()
             if form.cleaned_data["payment_method"] == Booking.PaymentMethod.CASH:
+                transaction.on_commit(lambda: notify_booking_parties(
+                    booking.pk, "requested", request.build_absolute_uri("/").rstrip("/"),
+                ))
                 return redirect("my-bookings")
             return redirect("pay-booking-order", order_id=order.pk)
         except ValidationError as exc:
@@ -625,7 +672,9 @@ def create_booking(request, slug):
                         form.add_error(field if field in form.fields else None, error)
             else:
                 form.add_error(None, "; ".join(exc.messages))
-    return render(request, "core/listing_detail.html", {"listing": listing, "form": form, "today": timezone.localdate().isoformat()}, status=400)
+    return render(
+        request, "core/listing_detail.html", _listing_detail_context(request, listing, form), status=400,
+    )
 
 
 @login_required
@@ -640,7 +689,10 @@ def my_bookings(request):
             BookingOrder.Status.CANCELLED,
         ],
     ).select_related("listing").prefetch_related("listing__images")
-    active_bookings_count = bookings.exclude(status=Booking.Status.CANCELLED).count()
+    active_bookings_count = bookings.filter(
+        status__in=ACTIVE_BOOKING_STATUSES,
+        check_out__gt=timezone.localdate(),
+    ).count()
     return render(request, "core/my_bookings.html", {
         "bookings": bookings,
         "booking_orders": booking_orders,
@@ -682,10 +734,70 @@ def provider_onboarding(request):
 def provider_dashboard(request):
     host_profile = get_object_or_404(HostProfile, user=request.user)
     listings = RentalListing.objects.filter(owner=request.user).select_related("region", "district").prefetch_related("images")
+    provider_bookings = Booking.objects.filter(
+        listing__owner=request.user,
+        status__in=ACTIVE_BOOKING_STATUSES,
+        check_out__gt=timezone.localdate(),
+    ).select_related("listing", "user").prefetch_related("listing__images")
     return render(request, "core/provider_dashboard.html", {
         "host_profile": host_profile,
         "listings": listings,
+        "provider_bookings": provider_bookings,
+        "rented_listing_ids": set(
+            provider_bookings.filter(status=Booking.Status.HANDED_OVER)
+            .values_list("listing_id", flat=True)
+        ),
     })
+
+
+@login_required
+@require_POST
+def update_listing_availability(request, listing_id):
+    listing = get_object_or_404(RentalListing, pk=listing_id, owner=request.user)
+    form = ListingAvailabilityForm(request.POST)
+    if form.is_valid():
+        listing.availability_status = form.cleaned_data["status"]
+        listing.save(update_fields=["availability_status"])
+        if listing.availability_status == RentalListing.AvailabilityStatus.REPAIR:
+            messages.success(request, "E'lon remontga o'tkazildi va foydalanuvchilardan yashirildi.")
+        else:
+            messages.success(request, "E'lon holati Faol qilindi.")
+    else:
+        messages.error(request, "E'lon holatini tanlang.")
+    return redirect("provider-dashboard")
+
+
+@login_required
+@require_POST
+def update_provider_booking(request, booking_id, action):
+    if action not in {"confirm", "handover"}:
+        raise Http404
+    with transaction.atomic():
+        booking = get_object_or_404(
+            Booking.objects.select_for_update().select_related("listing"),
+            pk=booking_id,
+            listing__owner=request.user,
+        )
+        if booking.check_out <= timezone.localdate():
+            messages.error(request, "Ijara muddati tugagan bronni o'zgartirib bo'lmaydi.")
+            return redirect("provider-dashboard")
+        if action == "confirm" and booking.status == Booking.Status.PENDING:
+            booking.status = Booking.Status.CONFIRMED
+            event = "confirmed"
+        elif action == "handover" and booking.status == Booking.Status.CONFIRMED:
+            booking.status = Booking.Status.HANDED_OVER
+            event = "handed_over"
+        else:
+            messages.error(request, "Bu bron uchun amalni bajarib bo'lmaydi.")
+            return redirect("provider-dashboard")
+        booking.save(update_fields=["status", "updated_at"])
+        base_url = request.build_absolute_uri("/").rstrip("/")
+        transaction.on_commit(lambda: notify_booking_parties(booking.pk, event, base_url))
+    messages.success(
+        request,
+        "Bron tasdiqlandi." if action == "confirm" else "Mahsulot ijaraga topshirildi.",
+    )
+    return redirect("provider-dashboard")
 
 
 @login_required
@@ -726,6 +838,120 @@ def contact_admin(request):
         messages.success(request, "Xabaringiz administratorlarga yuborildi.")
         return redirect("contact-admin")
     return render(request, "core/contact.html", {"form": form})
+
+
+@login_required
+@require_POST
+def start_chat(request, slug):
+    listing = get_object_or_404(RentalListing, slug=slug, is_active=True, owner__isnull=False)
+    if listing.owner_id == request.user.pk:
+        messages.error(request, "O'zingiz bilan chat boshlay olmaysiz.")
+        return redirect("listing-detail", slug=slug)
+    if not can_view_listing(request.user, listing):
+        raise Http404
+    conversation, _ = Conversation.objects.get_or_create(
+        listing=listing,
+        customer=request.user,
+        defaults={"provider_id": listing.owner_id},
+    )
+    return redirect("chat-room", conversation_id=conversation.pk)
+
+
+@login_required
+@require_POST
+def start_booking_chat(request, booking_id):
+    booking = get_object_or_404(
+        Booking.objects.select_related("listing", "user"),
+        pk=booking_id,
+        listing__owner=request.user,
+    )
+    conversation, _ = Conversation.objects.get_or_create(
+        listing=booking.listing,
+        customer=booking.user,
+        defaults={"provider": request.user},
+    )
+    return redirect("chat-room", conversation_id=conversation.pk)
+
+
+@login_required
+def chat_inbox(request):
+    conversations = Conversation.objects.filter(
+        Q(customer=request.user) | Q(provider=request.user),
+    ).select_related("listing", "customer", "provider")
+    return render(request, "core/chat_inbox.html", {"conversations": conversations})
+
+
+@login_required
+def chat_room(request, conversation_id):
+    conversation = get_object_or_404(
+        Conversation.objects.select_related("listing", "customer", "provider"),
+        Q(customer=request.user) | Q(provider=request.user),
+        pk=conversation_id,
+    )
+    if request.method == "POST":
+        form = ChatMessageForm(request.POST, request.FILES)
+        if form.is_valid():
+            message = form.save(commit=False)
+            message.conversation = conversation
+            message.sender = request.user
+            if form.cleaned_data.get("attachment"):
+                message.attachment_type = form.cleaned_data["attachment_type"]
+            message.full_clean()
+            message.save()
+            conversation.save(update_fields=["updated_at"])
+            return redirect("chat-room", conversation_id=conversation.pk)
+    else:
+        form = ChatMessageForm()
+    chat_messages = list(conversation.messages.select_related("sender").order_by("created_at")[:200])
+    return render(request, "core/chat_room.html", {
+        "conversation": conversation,
+        "chat_messages": chat_messages,
+        "latest_chat_message_id": chat_messages[-1].pk if chat_messages else 0,
+        "form": form,
+    })
+
+
+@login_required
+@require_GET
+def chat_messages_api(request, conversation_id):
+    conversation = get_object_or_404(
+        Conversation.objects.filter(Q(customer=request.user) | Q(provider=request.user)),
+        pk=conversation_id,
+    )
+    try:
+        after = max(0, int(request.GET.get("after", "0")))
+    except (TypeError, ValueError):
+        return JsonResponse({"detail": "after musbat butun son bo'lishi kerak."}, status=400)
+    messages_qs = conversation.messages.filter(pk__gt=after).select_related("sender").order_by("created_at")[:100]
+    return JsonResponse({
+        "messages": [{
+            "id": message.pk,
+            "sender": message.sender.get_full_name() or message.sender.get_username(),
+            "mine": message.sender_id == request.user.pk,
+            "text": message.text,
+            "attachment_type": message.attachment_type,
+            "attachment_url": reverse("chat-media", args=[message.pk]) if message.attachment else "",
+            "created_at": timezone.localtime(message.created_at).strftime("%d.%m.%Y %H:%M"),
+        } for message in messages_qs],
+    })
+
+
+@login_required
+@require_GET
+def chat_media(request, message_id):
+    message = get_object_or_404(
+        ChatMessage.objects.select_related("conversation"),
+        pk=message_id,
+    )
+    if request.user.pk not in (message.conversation.customer_id, message.conversation.provider_id):
+        raise Http404
+    if not message.attachment:
+        raise Http404
+    file_handle = message.attachment.open("rb")
+    content_type = mimetypes.guess_type(message.attachment.name)[0] or "application/octet-stream"
+    response = FileResponse(file_handle, content_type=content_type)
+    response["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 @require_GET
@@ -780,6 +1006,9 @@ def cancel_booking(request, booking_id):
     if booking.status in (Booking.Status.PENDING, Booking.Status.CONFIRMED):
         booking.status = Booking.Status.CANCELLED
         booking.save(update_fields=["status", "updated_at"])
+        transaction.on_commit(lambda: notify_booking_parties(
+            booking.pk, "cancelled", request.build_absolute_uri("/").rstrip("/"),
+        ))
         messages.success(request, f"#{booking.pk} bron bekor qilindi.")
     else:
         messages.info(request, "Bu bron avval bekor qilingan.")
@@ -803,7 +1032,7 @@ def ai_rental_search(request):
     if not message or len(message) > 500:
         return JsonResponse({"detail": "So'rov 1–500 ta belgidan iborat bo'lishi kerak."}, status=400)
     try:
-        result = find_rentals(message)
+        result = find_rentals(message, user=request.user)
     except RentalAssistantError as exc:
         return JsonResponse({"detail": str(exc)}, status=exc.status_code)
     return JsonResponse(result)
@@ -812,7 +1041,10 @@ def ai_rental_search(request):
 @api_view(["GET"])
 @permission_classes([AllowAny])
 def listings_api(request):
-    listings = RentalListing.objects.filter(is_active=True).select_related("region", "district").prefetch_related("images")
+    listings = listings_visible_to(
+        request.user,
+        RentalListing.objects.select_related("region", "district").prefetch_related("images"),
+    )
     kind = request.query_params.get("kind")
     city = request.query_params.get("city", "").strip()
     query = request.query_params.get("q", "").strip()
@@ -843,10 +1075,9 @@ def listings_api(request):
 @api_view(["GET"])
 @permission_classes([AllowAny])
 def listing_detail_api(request, listing_id):
-    listing = get_object_or_404(
-        RentalListing.objects.select_related("region", "district").prefetch_related("images"),
-        pk=listing_id, is_active=True,
-    )
+    listing = get_object_or_404(RentalListing.objects.select_related("region", "district").prefetch_related("images"), pk=listing_id)
+    if not can_view_listing(request.user, listing):
+        return Response({"detail": "E'lon topilmadi."}, status=status.HTTP_404_NOT_FOUND)
     return Response(ListingSerializer(listing).data)
 
 
@@ -872,24 +1103,9 @@ def cancel_booking_api(request, booking_id):
     booking = Booking.objects.filter(pk=booking_id, user=request.user).first()
     if not booking:
         return Response({"detail": "Bron topilmadi."}, status=status.HTTP_404_NOT_FOUND)
-    if booking.status == Booking.Status.CANCELLED:
+    if booking.status not in (Booking.Status.PENDING, Booking.Status.CONFIRMED):
         return Response({"detail": "Bron avval bekor qilingan."}, status=status.HTTP_400_BAD_REQUEST)
     booking.status = Booking.Status.CANCELLED
     booking.save(update_fields=["status", "updated_at"])
+    transaction.on_commit(lambda: notify_booking_parties(booking.pk, "cancelled"))
     return Response(BookingSerializer(booking).data)
-
-
-
-class HomeViewSet(viewsets.ModelViewSet):
-    serializer_class = homeSerializer
-    permission_classes = [AllowAny]
-
-    def get_queryset(self):
-        return home.objects.all()
-    
-class CarViewSet(viewsets.ModelViewSet):
-    serializer_class = carSerializer
-    permission_classes = [AllowAny]
-
-    def get_queryset(self):
-        return car.objects.all()

@@ -3,9 +3,20 @@ import uuid
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.core.files.storage import FileSystemStorage
 from django.db import models
 from django.utils import timezone
+from django.utils.deconstruct import deconstructible
 from django.utils.text import slugify
+
+
+@deconstructible
+class ChatMediaStorage(FileSystemStorage):
+    def __init__(self):
+        super().__init__(location=settings.CHAT_MEDIA_ROOT)
+
+
+chat_media_storage = ChatMediaStorage()
 
 
 class Region(models.Model):
@@ -44,6 +55,7 @@ class TelegramAccount(models.Model):
     phone_number = models.CharField(max_length=16, unique=True)
     telegram_user_id = models.CharField(max_length=32, unique=True)
     chat_id = models.CharField(max_length=32, unique=True)
+    telegram_username = models.CharField(max_length=64, blank=True)
     last_otp_sent_at = models.DateTimeField(null=True, blank=True)
     linked_at = models.DateTimeField(auto_now_add=True)
 
@@ -117,7 +129,7 @@ class ContactMessage(models.Model):
         null=True, blank=True,
     )
     name = models.CharField("Ism", max_length=120)
-    email = models.EmailField("Elektron pochta")
+    email = models.EmailField("Elektron pochta", blank=True)
     subject = models.CharField("Mavzu", max_length=160)
     message = models.TextField("Xabar", max_length=5000)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -141,6 +153,10 @@ class RentalListing(models.Model):
         AUTOMATIC = "automatic", "Avtomat"
         MANUAL = "manual", "Mexanika"
         NOT_APPLICABLE = "na", "Ko'rsatilmagan"
+
+    class AvailabilityStatus(models.TextChoices):
+        ACTIVE = "active", "Faol"
+        REPAIR = "repair", "Remont"
 
     kind = models.CharField("Turi", max_length=10, choices=Kind.choices)
     title = models.CharField("Nomi (UZ)", max_length=160)
@@ -172,6 +188,10 @@ class RentalListing(models.Model):
     year = models.PositiveSmallIntegerField("Ishlab chiqarilgan yil", blank=True, null=True)
     is_featured = models.BooleanField("Tavsiya etilgan", default=False)
     is_active = models.BooleanField("Faol", default=True)
+    availability_status = models.CharField(
+        "Ijara holati", max_length=10, choices=AvailabilityStatus.choices,
+        default=AvailabilityStatus.ACTIVE,
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -240,6 +260,7 @@ class Booking(models.Model):
     class Status(models.TextChoices):
         PENDING = "pending", "Kutilmoqda"
         CONFIRMED = "confirmed", "Tasdiqlangan"
+        HANDED_OVER = "handed_over", "Mijozga topshirilgan"
         CANCELLED = "cancelled", "Bekor qilingan"
 
     class PaymentMethod(models.TextChoices):
@@ -256,6 +277,7 @@ class Booking(models.Model):
     payment_method = models.CharField("To'lov turi", max_length=20, choices=PaymentMethod.choices, default=PaymentMethod.CASH)
     total_price = models.DecimalField("Jami narx (so'm)", max_digits=14, decimal_places=2, default=Decimal("0.00"))
     status = models.CharField("Holati", max_length=12, choices=Status.choices, default=Status.PENDING)
+    requested_at = models.DateTimeField("Bron so'rovi vaqti", default=timezone.now)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -271,6 +293,14 @@ class Booking(models.Model):
 
     def clean(self):
         errors = {}
+        if self.listing_id and self.user_id and self.listing.owner_id == self.user_id:
+            errors["listing"] = "O'zingiz joylagan e'lonni bron qila olmaysiz."
+        if (
+            self.listing_id
+            and self.listing.availability_status != RentalListing.AvailabilityStatus.ACTIVE
+            and self.status != self.Status.CANCELLED
+        ):
+            errors["listing"] = "Bu e'lon hozir remontda."
         if self.check_in and self.check_out:
             if self.check_in < timezone.localdate():
                 errors["check_in"] = "Boshlanish sanasi bugundan oldin bo'lishi mumkin emas."
@@ -284,7 +314,7 @@ class Booking(models.Model):
         if self.listing_id and self.check_in and self.check_out and self.check_out > self.check_in:
             conflicts = Booking.objects.filter(
                 listing_id=self.listing_id,
-                status__in=[self.Status.PENDING, self.Status.CONFIRMED],
+                status__in=[self.Status.PENDING, self.Status.CONFIRMED, self.Status.HANDED_OVER],
                 check_in__lt=self.check_out,
                 check_out__gt=self.check_in,
             )
@@ -347,6 +377,13 @@ class BookingOrder(models.Model):
 
     def clean(self):
         errors = {}
+        if self.listing_id and self.user_id and self.listing.owner_id == self.user_id:
+            errors["listing"] = "O'zingiz joylagan e'lonni bron qila olmaysiz."
+        if (
+            self.listing_id
+            and self.listing.availability_status != RentalListing.AvailabilityStatus.ACTIVE
+        ):
+            errors["listing"] = "Bu e'lon hozir remontda."
         if self.check_in and self.check_out:
             if self.check_in < timezone.localdate():
                 errors["check_in"] = "Boshlanish sanasi bugundan oldin bo'lishi mumkin emas."
@@ -359,7 +396,7 @@ class BookingOrder(models.Model):
         if self.listing_id and self.check_in and self.check_out and self.check_out > self.check_in:
             conflicts = Booking.objects.filter(
                 listing_id=self.listing_id,
-                status__in=[Booking.Status.PENDING, Booking.Status.CONFIRMED],
+                status__in=[Booking.Status.PENDING, Booking.Status.CONFIRMED, Booking.Status.HANDED_OVER],
                 check_in__lt=self.check_out,
                 check_out__gt=self.check_in,
             )
@@ -409,32 +446,49 @@ class PaymentTransaction(models.Model):
         return f"{self.provider} — {self.provider_transaction_id}"
 
 
+class Conversation(models.Model):
+    listing = models.ForeignKey(RentalListing, on_delete=models.CASCADE, related_name="conversations")
+    customer = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="rental_conversations",
+    )
+    provider = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="provider_conversations",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
-
-class home(models.Model):
-    title = models.CharField(max_length=255, blank=True, null=True)
-    slug = models.SlugField(unique=True, blank=True, null=True)
-    city = models.CharField(max_length=100)
-    address = models.CharField(max_length=255, blank=True, null=True)
-    description = models.TextField(blank=True, null=True)
-    price_per_day = models.DecimalField(max_digits=10, decimal_places=2)
-    capacity = models.PositiveIntegerField(default=1)
-    bedrooms = models.PositiveIntegerField(default=1)
-    bathrooms = models.PositiveIntegerField(default=1)
-    image_url = models.URLField(blank=True, null=True)
-    is_featured = models.BooleanField(default=False)
-    is_active = models.BooleanField(default=True)
-
-    def __str__(self):
-        return self.title or "Untitled Home"
-
-
-class car(models.Model):
-    name = models.CharField(max_length=255)
-    brand = models.CharField(max_length=100)
-    year = models.PositiveIntegerField()
-    price = models.DecimalField(max_digits=10, decimal_places=2)
-    description = models.TextField(blank=True, null=True)
+    class Meta:
+        ordering = ["-updated_at"]
+        constraints = [
+            models.UniqueConstraint(fields=["listing", "customer"], name="core_chat_listing_customer_uniq"),
+        ]
 
     def __str__(self):
-        return f"{self.brand} {self.name} ({self.year})"
+        return f"{self.listing.title}: {self.customer} ↔ {self.provider}"
+
+
+class ChatMessage(models.Model):
+    class AttachmentType(models.TextChoices):
+        IMAGE = "image", "Rasm"
+        AUDIO = "audio", "Ovozli xabar"
+
+    conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name="messages")
+    sender = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="rental_chat_messages",
+    )
+    text = models.TextField(blank=True, max_length=5000)
+    attachment = models.FileField(upload_to="chat/%Y/%m/", storage=chat_media_storage, blank=True)
+    attachment_type = models.CharField(max_length=10, choices=AttachmentType.choices, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at"]
+
+    def clean(self):
+        if not self.text.strip() and not self.attachment:
+            raise ValidationError("Xabar matni yoki rasm/ovozli fayl yuboring.")
+        if self.attachment and not self.attachment_type:
+            raise ValidationError({"attachment_type": "Fayl turi aniqlanmagan."})
+
+    def __str__(self):
+        return f"{self.sender} — {self.created_at:%Y-%m-%d %H:%M}"

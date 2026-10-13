@@ -146,7 +146,7 @@
     input.disabled = true;
     sendButton.disabled = true;
     form.setAttribute("aria-busy", "true");
-    const loadingTurn = addTurn("assistant", translate("Ijara variantlari qidirilmoqda…"), { loading: true });
+    const loadingTurn = addTurn("assistant", translate("Savolingiz ustida ishlayapman…"), { loading: true });
 
     try {
       const response = await fetch(form.action, {
