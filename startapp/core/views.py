@@ -13,7 +13,7 @@ from django.contrib.auth.views import LoginView
 from django.contrib.auth.hashers import check_password, make_password
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import Q
+from django.db.models import F, Q
 from django.http import FileResponse, Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -881,6 +881,21 @@ def chat_inbox(request):
     return render(request, "core/chat_inbox.html", {"conversations": conversations})
 
 
+def _mark_conversation_read(conversation, user, message_id):
+    if not message_id:
+        return
+    if conversation.customer_id == user.pk:
+        Conversation.objects.filter(
+            pk=conversation.pk,
+            customer_last_read_message_id__lt=message_id,
+        ).update(customer_last_read_message_id=message_id)
+    elif conversation.provider_id == user.pk:
+        Conversation.objects.filter(
+            pk=conversation.pk,
+            provider_last_read_message_id__lt=message_id,
+        ).update(provider_last_read_message_id=message_id)
+
+
 @login_required
 def chat_room(request, conversation_id):
     conversation = get_object_or_404(
@@ -902,11 +917,16 @@ def chat_room(request, conversation_id):
             return redirect("chat-room", conversation_id=conversation.pk)
     else:
         form = ChatMessageForm()
-    chat_messages = list(conversation.messages.select_related("sender").order_by("created_at")[:200])
+    chat_messages = list(
+        conversation.messages.select_related("sender").order_by("-created_at", "-pk")[:200]
+    )
+    chat_messages.reverse()
+    latest_message_id = chat_messages[-1].pk if chat_messages else 0
+    _mark_conversation_read(conversation, request.user, latest_message_id)
     return render(request, "core/chat_room.html", {
         "conversation": conversation,
         "chat_messages": chat_messages,
-        "latest_chat_message_id": chat_messages[-1].pk if chat_messages else 0,
+        "latest_chat_message_id": latest_message_id,
         "form": form,
     })
 
@@ -922,7 +942,11 @@ def chat_messages_api(request, conversation_id):
         after = max(0, int(request.GET.get("after", "0")))
     except (TypeError, ValueError):
         return JsonResponse({"detail": "after musbat butun son bo'lishi kerak."}, status=400)
-    messages_qs = conversation.messages.filter(pk__gt=after).select_related("sender").order_by("created_at")[:100]
+    messages_qs = list(
+        conversation.messages.filter(pk__gt=after).select_related("sender").order_by("created_at", "pk")[:100]
+    )
+    if messages_qs:
+        _mark_conversation_read(conversation, request.user, max(message.pk for message in messages_qs))
     return JsonResponse({
         "messages": [{
             "id": message.pk,
@@ -934,6 +958,22 @@ def chat_messages_api(request, conversation_id):
             "created_at": timezone.localtime(message.created_at).strftime("%d.%m.%Y %H:%M"),
         } for message in messages_qs],
     })
+
+
+@login_required
+@require_GET
+def chat_unread_status(request):
+    has_unread = ChatMessage.objects.filter(
+        Q(
+            conversation__customer=request.user,
+            pk__gt=F("conversation__customer_last_read_message_id"),
+        )
+        | Q(
+            conversation__provider=request.user,
+            pk__gt=F("conversation__provider_last_read_message_id"),
+        ),
+    ).exclude(sender=request.user).exists()
+    return JsonResponse({"has_unread": has_unread})
 
 
 @login_required
@@ -1031,8 +1071,11 @@ def ai_rental_search(request):
     message = payload["message"].strip()
     if not message or len(message) > 500:
         return JsonResponse({"detail": "So'rov 1–500 ta belgidan iborat bo'lishi kerak."}, status=400)
+    language = payload.get("language", "uz")
+    if language not in {"uz", "ru", "en"}:
+        language = "uz"
     try:
-        result = find_rentals(message, user=request.user)
+        result = find_rentals(message, user=request.user, language=language)
     except RentalAssistantError as exc:
         return JsonResponse({"detail": str(exc)}, status=exc.status_code)
     return JsonResponse(result)

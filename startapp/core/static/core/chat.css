@@ -27,3 +27,7 @@
 .chat-compose-actions span{font-size:13px;color:#58735d}
 .chat-compose>p{font-size:12px;color:#7b857e;margin:8px 0 0}
 @media(max-width:600px){.chat-page{padding:24px 16px 56px}.chat-room-header{align-items:flex-start;padding:18px}.chat-room-header h1{font-size:20px}.chat-messages{min-height:280px;padding:14px}.chat-message{max-width:90%}.chat-compose{padding:14px}.chat-compose-actions{gap:8px}.chat-compose-actions .btn{padding:10px 12px}}
+.chat-inbox-item:hover{background:#f7faf5}
+.chat-inbox-item:focus-visible,.chat-room-header a:focus-visible,.chat-file-label:focus-visible{outline:3px solid #78a957;outline-offset:-3px}
+.chat-room-header a{display:inline-flex;align-items:center;min-height:38px;padding:8px 12px;border:1px solid #dce5d8;border-radius:10px;background:#f5f8f2;font-weight:700}
+.chat-room-header a:hover{background:#edf5e7}

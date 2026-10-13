@@ -3,14 +3,14 @@
 {% block title %}{{ listing.title }} — Rentora{% endblock %}
 {% block extra_head %}
 <link rel="stylesheet" href="{% static 'core/listing-images.css' %}">
-<link rel="stylesheet" href="{% static 'core/chat.css' %}">
+<link rel="stylesheet" href="{% static 'core/chat.css' %}?v=20261013-nav5">
 {% endblock %}
 {% block content %}
-<header class="site-header wrap">
+<header class="site-header wrap" data-unread-endpoint="{% url 'chat-unread-status' %}">
   <a class="brand" href="{% url 'home' %}"><span class="brand-symbol"><i></i><i></i><i></i></span><span>Rentora</span></a>
-  <nav class="main-nav"><a href="{% url 'home' %}#listings">Ijara topish</a><a href="{% url 'home' %}#how-it-works">Qanday ishlaydi?</a>{% if request.user.is_authenticated %}<a href="{% url 'chat-inbox' %}">Chatlar</a>{% endif %}</nav>
+  <nav class="main-nav" id="main-nav"><a href="{% url 'home' %}#listings">Ijara topish</a><a href="{% url 'home' %}#how-it-works">Qanday ishlaydi?</a>{% if request.user.is_authenticated %}<a href="{% url 'chat-inbox' %}">Chatlar<span class="unread-dot" data-unread-indicator role="img" aria-label="O'qilmagan yangi xabarlar"{% if not has_unread_chat_messages %} hidden{% endif %}></span></a>{% endif %}</nav>
   <div class="header-actions">{% include 'core/language_switcher.html' %}{% if request.user.is_authenticated %}<a class="nav-bookings" href="{% url 'my-bookings' %}">Bronlarim</a><a class="user-pill" href="{% url 'profile' %}" aria-label="Profil">{{ request.user.first_name|default:request.user.username|first|upper }}</a>{% else %}<a class="nav-login" href="{% url 'login' %}">Kirish</a><a class="btn btn-dark btn-small" href="{% url 'register' %}">Ro'yxatdan o'tish</a>{% endif %}</div>
-  <a class="mobile-back" href="{% url 'home' %}">← Orqaga</a>
+  <a class="mobile-back" href="{% url 'home' %}">← Orqaga</a><button class="mobile-menu-button" data-menu-toggle aria-controls="main-nav" aria-label="Menyuni ochish" aria-expanded="false">☰</button>
 </header>
 <main class="detail-main wrap">
   <a class="back-link" href="{% url 'home' %}#listings">← Barcha variantlar</a>

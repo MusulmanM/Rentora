@@ -4,6 +4,7 @@ import hashlib
 from io import BytesIO
 import json
 from io import StringIO
+from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 from urllib.error import HTTPError
@@ -68,6 +69,31 @@ class WebsiteTests(StartAppBaseTest):
         self.assertContains(response, '<option value="ru">RU</option>', html=True)
         self.assertContains(response, '<option value="en">EN</option>', html=True)
         self.assertContains(response, 'core/i18n.js')
+
+    def test_chat_page_has_language_controls_and_dynamic_text_protection(self):
+        provider = User.objects.create_user(username="provider", password="provider-password")
+        self.home.owner = provider
+        self.home.save(update_fields=["owner"])
+        conversation = Conversation.objects.create(
+            listing=self.home, customer=self.user, provider=provider,
+        )
+        ChatMessage.objects.create(
+            conversation=conversation, sender=provider, text="Do not translate this message",
+        )
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("chat-room", args=[conversation.pk]))
+        self.assertContains(response, "data-language-switcher")
+        self.assertContains(response, "data-unread-indicator")
+        self.assertContains(response, 'data-unread-endpoint="/chats/unread/"')
+        self.assertContains(response, "data-no-translate")
+
+    def test_localization_covers_navigation_chat_and_ai_dynamic_updates(self):
+        localization = Path(__file__).parent / "static" / "core" / "i18n.js"
+        source = localization.read_text(encoding="utf-8")
+        self.assertIn('["Chatlar", "Чаты", "Chats"]', source)
+        self.assertIn("data-no-translate", source)
+        self.assertIn("new MutationObserver", source)
+        self.assertIn("O'qilmagan yangi xabarlar", source)
 
     @override_settings(OPENAI_API_KEY="")
     def test_ai_chat_is_sitewide_and_explains_disabled_configuration(self):
@@ -141,7 +167,10 @@ class WebsiteTests(StartAppBaseTest):
         }
         response = self.client.post(
             reverse("ai-rental-search"),
-            data=json.dumps({"message": "Toshkentda 4 kishilik uy, 3 kun, arzonroq"}),
+            data=json.dumps({
+                "message": "Toshkentda 4 kishilik uy, 3 kun, arzonroq",
+                "language": "ru",
+            }),
             content_type="application/json",
         )
         self.assertEqual(response.status_code, 200)
@@ -149,7 +178,20 @@ class WebsiteTests(StartAppBaseTest):
         self.assertEqual(len(data["results"]), 1)
         self.assertEqual(data["results"][0]["title"], "Test apartment")
         self.assertEqual(data["results"][0]["total_price"], "750000.00")
-        interpret.assert_called_once()
+        interpret.assert_called_once_with(
+            "Toshkentda 4 kishilik uy, 3 kun, arzonroq", language="ru",
+        )
+
+    @override_settings(OPENAI_API_KEY="test-openai-key")
+    def test_ai_prompt_uses_the_selected_ui_language_for_assistant_replies(self):
+        response_content = {"choices": [{"message": {"content": "{}"}}]}
+        with patch(
+            "core.ai_assistant.urlopen",
+            return_value=BytesIO(json.dumps(response_content).encode("utf-8")),
+        ) as openai_request:
+            _interpret_request("Where can I rent?", language="ru")
+        request_payload = json.loads(openai_request.call_args.args[0].data.decode("utf-8"))
+        self.assertIn("language: ru", request_payload["messages"][0]["content"])
 
     def test_ai_rental_search_rejects_requests_outside_its_scope(self):
         with patch("core.ai_assistant._interpret_request", return_value={"task": "out_of_scope"}):
@@ -925,6 +967,47 @@ class ChatTests(StartAppBaseTest):
             404,
         )
         self.assertEqual(self.client.get(reverse("chat-media", args=[message.pk])).status_code, 404)
+
+    def test_unread_indicator_tracks_each_participant_and_excludes_own_messages(self):
+        incoming = ChatMessage.objects.create(
+            conversation=self.conversation, sender=self.provider, text="New details",
+        )
+        unread_url = reverse("chat-unread-status")
+        self.client.force_login(self.user)
+        self.assertTrue(self.client.get(unread_url).json()["has_unread"])
+        inbox = self.client.get(reverse("chat-inbox"))
+        markup = inbox.content.decode()
+        self.assertRegex(markup, r'data-unread-indicator[^>]*aria-label="[^"]+"')
+        self.assertNotRegex(markup, r'data-unread-indicator[^>]*\shidden')
+
+        room = self.client.get(reverse("chat-room", args=[self.conversation.pk]))
+        self.assertEqual(room.status_code, 200)
+        self.conversation.refresh_from_db()
+        self.assertGreaterEqual(self.conversation.customer_last_read_message_id, incoming.pk)
+        self.assertFalse(self.client.get(unread_url).json()["has_unread"])
+
+        own_message = ChatMessage.objects.create(
+            conversation=self.conversation, sender=self.user, text="My reply",
+        )
+        self.assertFalse(self.client.get(unread_url).json()["has_unread"])
+        self.client.force_login(self.provider)
+        self.assertTrue(self.client.get(unread_url).json()["has_unread"])
+        self.client.get(reverse("chat-room", args=[self.conversation.pk]))
+        self.conversation.refresh_from_db()
+        self.assertGreaterEqual(self.conversation.provider_last_read_message_id, own_message.pk)
+        self.assertFalse(self.client.get(unread_url).json()["has_unread"])
+
+    def test_polling_new_chat_messages_marks_them_read(self):
+        ChatMessage.objects.create(
+            conversation=self.conversation, sender=self.provider, text="Available tomorrow",
+        )
+        self.client.force_login(self.user)
+        response = self.client.get(
+            reverse("chat-messages-api", args=[self.conversation.pk]), {"after": 0},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()["messages"]), 1)
+        self.assertFalse(self.client.get(reverse("chat-unread-status")).json()["has_unread"])
 
 
 class ApiTests(StartAppBaseTest):

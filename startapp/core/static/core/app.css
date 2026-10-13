@@ -14,3 +14,33 @@
 .language-switcher{display:inline-flex;align-items:center;gap:6px;flex-shrink:0;color:#7c8781;font-size:10px;font-weight:800;letter-spacing:.04em}.language-switcher label{white-space:nowrap}.language-switcher select{appearance:none;min-width:48px;border:1px solid #e0e6dc;border-radius:9px;background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath d='m2 3 3 3 3-3' fill='none' stroke='%2353615b' stroke-width='1.5'/%3E%3C/svg%3E") no-repeat right 7px center;padding:7px 22px 7px 8px;color:#26352c;font-size:11px;font-weight:800;cursor:pointer;outline-offset:2px}.auth-language{align-self:flex-end;margin-bottom:10px}.auth-language .language-switcher{font-size:11px}.auth-language .language-switcher select{min-width:55px;padding-block:9px}.language-switcher select:focus-visible{outline:2px solid #80ad59}@media(max-width:760px){.header-actions .language-switcher label{display:none}.header-actions .language-switcher select{min-width:44px;padding:7px 18px 7px 7px;font-size:10px}.header-actions{gap:7px}.auth-language{margin-bottom:8px}}
 
 .description-block p[data-localized-text]{white-space:pre-line}
+
+/* Header controls read as compact, keyboard-accessible navigation chips. */
+.main-nav{gap:8px}
+.main-nav a,.nav-login,.nav-bookings{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:40px;padding:8px 13px;border:1px solid #e0e6dc;border-radius:11px;background:#fff;color:#405247;font-size:12px;font-weight:700;transition:background .18s,border-color .18s,color .18s,transform .18s}
+.main-nav a:hover,.nav-login:hover,.nav-bookings:hover{border-color:#dbe4d6;background:#f1f6eb;color:#284b32;transform:translateY(-1px)}
+.main-nav a.nav-active{border-color:#cddfc1;background:#eaf3e3;color:#294f34;box-shadow:inset 0 0 0 1px #e2edd9}
+.main-nav a:focus-visible,.nav-login:focus-visible,.nav-bookings:focus-visible,.user-pill:focus-visible,.language-switcher select:focus-visible,.mobile-menu-button:focus-visible{outline:3px solid #78a957;outline-offset:2px}
+.header-actions{gap:8px}
+.nav-login{background:transparent}
+.nav-bookings{border-color:#e2e8de;background:#fff}
+.unread-dot{display:inline-block;width:9px;height:9px;flex:0 0 9px;border-radius:50%;background:#d64040;box-shadow:0 0 0 3px #d640401f}
+.unread-dot[hidden]{display:none}
+.mobile-nav-item{display:none!important}
+@media(max-width:760px){
+  .site-header>.mobile-back{display:none}
+  .main-nav{gap:5px}
+  .main-nav a{min-height:42px;padding:11px 13px;border-color:#edf0eb;border-radius:10px;background:#fff}
+  .main-nav a.nav-active{background:#edf5e7}
+  .main-nav a.mobile-nav-item{display:flex!important}
+  .main-nav.menu-open{gap:5px}
+  .mobile-menu-button{width:42px;height:42px;min-width:42px;flex:0 0 42px;border:1px solid #dfe6dc;border-radius:10px;background:#fff;transition:background .18s,border-color .18s}
+  .mobile-menu-button:hover{background:#f1f6eb;border-color:#cbdcc3}
+}
+@media(min-width:761px) and (max-width:880px){
+  .site-header{gap:8px}
+  .brand{gap:7px;font-size:21px}
+  .main-nav,.header-actions{gap:4px}
+  .main-nav a,.nav-login,.nav-bookings{min-height:36px;padding:7px 8px;font-size:10px;white-space:nowrap}
+  .header-actions .btn{min-height:36px;padding:8px 9px;font-size:10px}
+}

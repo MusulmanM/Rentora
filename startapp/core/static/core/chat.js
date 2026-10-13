@@ -14,6 +14,7 @@
   function appendMessage(message) {
     const article = document.createElement("article");
     article.className = `chat-message${message.mine ? " is-mine" : ""}`;
+    article.dataset.noTranslate = "true";
     article.dataset.messageId = String(message.id);
     const sender = document.createElement("strong");
     sender.textContent = message.sender;
@@ -27,7 +28,9 @@
       if (message.attachment_type === "image") {
         const image = document.createElement("img");
         image.src = message.attachment_url;
-        image.alt = "Chat rasmi";
+        image.alt = window.startAppTranslate
+          ? window.startAppTranslate("Chat rasmi", window.startAppLanguage || "uz")
+          : "Chat rasmi";
         image.loading = "lazy";
         article.append(image);
       } else if (message.attachment_type === "audio") {

@@ -26,6 +26,7 @@ urlpatterns = [
     path("chats/start-booking/<int:booking_id>/", views.start_booking_chat, name="chat-start-booking"),
     path("chats/<int:conversation_id>/", views.chat_room, name="chat-room"),
     path("chats/<int:conversation_id>/messages/", views.chat_messages_api, name="chat-messages-api"),
+    path("chats/unread/", views.chat_unread_status, name="chat-unread-status"),
     path("chats/media/<int:message_id>/", views.chat_media, name="chat-media"),
     path("listing/<slug:slug>/", views.listing_detail, name="listing-detail"),
     path("listing/<slug:slug>/book/", views.create_booking, name="create-booking"),
