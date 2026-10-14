@@ -6,12 +6,13 @@
 
     const districtOptions = Array.from(districtSelect.options).slice(1);
     const allOption = districtSelect.options[0];
+    const chosenLabel = districtSelect.dataset.chosenLabel || "Barcha shaharlar va tumanlar";
     const filterDistricts = (resetSelection) => {
       const regionId = regionSelect.value;
       districtOptions.forEach((option) => {
         option.hidden = !regionId || option.dataset.region !== regionId;
       });
-      allOption.textContent = regionId ? "Barcha shaharlar va tumanlar" : "Avval viloyatni tanlang";
+      allOption.textContent = regionId ? chosenLabel : "Avval viloyatni tanlang";
       districtSelect.disabled = !regionId;
       if (resetSelection || (districtSelect.value && districtSelect.selectedOptions[0]?.hidden)) {
         districtSelect.value = "";

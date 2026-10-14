@@ -18,8 +18,8 @@
     <article class="my-booking-card">
       <div class="my-booking-info">
         <div class="my-booking-topline"><span class="booking-type-label">BUYURTMA</span><span class="booking-status status-pending">{{ order.get_status_display }}</span></div>
-        <h2><a href="{% url 'listing-detail' order.listing.slug %}">{{ order.listing.title }}</a></h2>
-        <p class="booking-city">⌖ {{ order.listing.city }} · {{ order.listing.address }}</p>
+        <h2><a href="{% url 'listing-detail' order.listing.slug %}">{% localized_title order.listing %}</a></h2>
+        <p class="booking-city">⌖ {% listing_location order.listing %} · {{ order.listing.address }}</p>
         <div class="booking-date-row"><span><small>BOSHLANISH</small><b>{{ order.check_in|date:'d.m.Y' }}</b></span><span class="date-arrow">→</span><span><small>TUGASH</small><b>{{ order.check_out|date:'d.m.Y' }}</b></span><span><small>TO'LOV</small><b>{{ order.get_payment_method_display }}</b></span></div>
       </div>
       <div class="my-booking-total"><small>TO'LANADIGAN SUMMA</small><strong>{{ order.total_price|money }} <small>so'm</small></strong>
@@ -39,7 +39,7 @@
       <div class="my-booking-info">
         <div class="my-booking-topline"><span class="booking-type-label">{% if booking.listing.is_home %}⌂ Uy{% else %}▱ Avtomobil{% endif %}</span><span class="booking-status status-{{ booking.status }}">{{ booking.get_status_display }}</span></div>
         <h2><a href="{% url 'listing-detail' booking.listing.slug %}" data-localized-text data-uz="{{ booking.listing.title }}" data-ru="{{ booking.listing.title_ru|default:booking.listing.title }}" data-en="{{ booking.listing.title_en|default:booking.listing.title }}">{{ booking.listing.title }}</a></h2>
-        <p class="booking-city">⌖ {{ booking.listing.city }} · {{ booking.listing.address }}</p>
+        <p class="booking-city">⌖ {% listing_location booking.listing %} · {{ booking.listing.address }}</p>
         <div class="booking-date-row"><span><small>BOSHLANISH</small><b>{{ booking.check_in|date:'d.m.Y' }}</b></span><span class="date-arrow">→</span><span><small>TUGASH</small><b>{{ booking.check_out|date:'d.m.Y' }}</b></span><span><small>DAVOMIYLIGI</small><b>{{ booking.days }} kun</b></span></div>
         <div class="booking-payment-row"><span><small>TO'LOV</small><b>{{ booking.get_payment_method_display }}</b></span></div>
         <small>Bron so'rovi: {{ booking.requested_at|date:'d.m.Y H:i' }}</small>

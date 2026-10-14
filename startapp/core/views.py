@@ -16,6 +16,7 @@ from django.db import IntegrityError, transaction
 from django.db.models import F, Q
 from django.http import FileResponse, Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
@@ -28,7 +29,7 @@ from .availability import ACTIVE_BOOKING_STATUSES, active_bookings, can_view_lis
 from .forms import (
     BookingForm, ChatMessageForm, ContactMessageForm, HostOnboardingForm,
     ListingAvailabilityForm, PhoneNumberForm, RegistrationForm, RegistrationOTPForm,
-    RentalListingForm, normalize_phone_number,
+    RentalListingForm,
 )
 from .models import (
     Booking, BookingOrder, District, HostProfile, PendingRegistration,
@@ -38,7 +39,8 @@ from .models import (
 from .payments import payment_url
 from .serializers import BookingSerializer, ListingSerializer
 from .ai_assistant import RentalAssistantError, find_rentals
-from .telegram import TelegramError, notify_booking_parties, request_contact, send_message
+from .listing_translation import translate_listing, translation_enabled
+from .telegram import TelegramError, handle_telegram_update, notify_booking_parties, send_message
 
 
 logger = logging.getLogger(__name__)
@@ -526,61 +528,7 @@ def telegram_webhook(request):
         return JsonResponse({"detail": "Noto'g'ri JSON."}, status=400)
     if not isinstance(update, dict):
         return JsonResponse({"detail": "Noto'g'ri Telegram yangilanishi."}, status=400)
-    message = update.get("message")
-    if not isinstance(message, dict):
-        return JsonResponse({"ok": True})
-    sender = message.get("from") or {}
-    chat = message.get("chat") or {}
-    telegram_user_id = sender.get("id")
-    chat_id = chat.get("id")
-    if not telegram_user_id or not chat_id or chat.get("type") != "private" or str(chat_id) != str(telegram_user_id):
-        return JsonResponse({"ok": True})
-
-    contact = message.get("contact")
-    if isinstance(contact, dict):
-        if str(contact.get("user_id", "")) != str(telegram_user_id):
-            return JsonResponse({"ok": True})
-        try:
-            phone_number = normalize_phone_number(contact.get("phone_number", ""))
-        except ValidationError:
-            try:
-                send_message(str(chat_id), "Faqat O'zbekiston telefon raqami bilan ro'yxatdan o'tish mumkin.")
-            except TelegramError:
-                logger.warning("Telegram could not send a contact validation message.")
-            return JsonResponse({"ok": True})
-        try:
-            telegram_username = str(sender.get("username", "")).strip().lstrip("@")[:64]
-            account, _ = TelegramAccount.objects.get_or_create(
-                phone_number=phone_number,
-                defaults={
-                    "telegram_user_id": str(telegram_user_id),
-                    "chat_id": str(chat_id),
-                    "telegram_username": telegram_username,
-                },
-            )
-        except IntegrityError:
-            account = TelegramAccount.objects.filter(phone_number=phone_number).first()
-        if account and (
-            account.telegram_user_id == str(telegram_user_id)
-            and account.chat_id == str(chat_id)
-        ):
-            if telegram_username and account.telegram_username != telegram_username:
-                account.telegram_username = telegram_username
-                account.save(update_fields=["telegram_username"])
-            response_text = "Telefon raqamingiz bog'landi. Endi Rentora saytida ro'yxatdan o'tishingiz mumkin."
-        else:
-            response_text = "Bu Telegram hisobi yoki telefon raqami boshqa akkauntga bog'langan."
-        try:
-            send_message(str(chat_id), response_text)
-        except TelegramError:
-            logger.warning("Telegram could not send the contact-link confirmation.")
-        return JsonResponse({"ok": True})
-
-    if str(message.get("text", "")).split(maxsplit=1)[0:1] == ["/start"]:
-        try:
-            request_contact(str(chat_id))
-        except TelegramError:
-            logger.warning("Telegram could not send the contact request prompt.")
+    handle_telegram_update(update)
     return JsonResponse({"ok": True})
 
 
@@ -615,6 +563,14 @@ def listing_detail(request, slug):
     }
     form = BookingForm(initial=initial, listing=listing, user=request.user if request.user.is_authenticated else None)
     return render(request, "core/listing_detail.html", _listing_detail_context(request, listing, form))
+
+
+def _warn_if_telegram_not_linked(request):
+    if not UserProfile.objects.filter(user=request.user).exists():
+        messages.warning(
+            request,
+            "Bron holati haqida Telegram xabarlarini olish uchun profilingizda telefon raqamingizni tasdiqlang.",
+        )
 
 
 @login_required
@@ -659,6 +615,7 @@ def create_booking(request, slug):
                     )
                     order.full_clean()
                     order.save()
+            _warn_if_telegram_not_linked(request)
             if form.cleaned_data["payment_method"] == Booking.PaymentMethod.CASH:
                 transaction.on_commit(lambda: notify_booking_parties(
                     booking.pk, "requested", request.build_absolute_uri("/").rstrip("/"),
@@ -741,6 +698,7 @@ def provider_dashboard(request):
     ).select_related("listing", "user").prefetch_related("listing__images")
     return render(request, "core/provider_dashboard.html", {
         "host_profile": host_profile,
+        "provider_has_telegram": UserProfile.objects.filter(user=request.user).exists(),
         "listings": listings,
         "provider_bookings": provider_bookings,
         "rented_listing_ids": set(
@@ -770,7 +728,7 @@ def update_listing_availability(request, listing_id):
 @login_required
 @require_POST
 def update_provider_booking(request, booking_id, action):
-    if action not in {"confirm", "handover"}:
+    if action not in {"confirm", "handover", "reject"}:
         raise Http404
     with transaction.atomic():
         booking = get_object_or_404(
@@ -787,41 +745,89 @@ def update_provider_booking(request, booking_id, action):
         elif action == "handover" and booking.status == Booking.Status.CONFIRMED:
             booking.status = Booking.Status.HANDED_OVER
             event = "handed_over"
+        elif action == "reject" and booking.status in (Booking.Status.PENDING, Booking.Status.CONFIRMED):
+            booking.status = Booking.Status.CANCELLED
+            event = "rejected"
         else:
             messages.error(request, "Bu bron uchun amalni bajarib bo'lmaydi.")
             return redirect("provider-dashboard")
         booking.save(update_fields=["status", "updated_at"])
         base_url = request.build_absolute_uri("/").rstrip("/")
         transaction.on_commit(lambda: notify_booking_parties(booking.pk, event, base_url))
-    messages.success(
-        request,
-        "Bron tasdiqlandi." if action == "confirm" else "Mahsulot ijaraga topshirildi.",
-    )
+    messages.success(request, {
+        "confirm": "Bron tasdiqlandi.",
+        "handover": "Mahsulot ijaraga topshirildi.",
+        "reject": "Bron so'rovi rad etildi.",
+    }[action])
     return redirect("provider-dashboard")
+
+
+def _save_listing_form(form, owner=None):
+    images = form.cleaned_data.get("image_uploads") or []
+    removed = form.cleaned_data.get("remove_images") or []
+    listing = form.save(commit=False)
+    if form.is_edit and translation_enabled():
+        # Re-translate copy whose Uzbek source changed, unless the provider edited that translation too.
+        for source, targets in (("title", ("title_ru", "title_en")), ("description", ("description_ru", "description_en"))):
+            if source in form.changed_data:
+                for target in targets:
+                    if target not in form.changed_data:
+                        setattr(listing, target, "")
+    if owner is not None:
+        listing.owner = owner
+        listing.is_active = True
+    listing.full_clean()
+    with transaction.atomic():
+        listing.save()
+        for image in removed:
+            image.image.delete(save=False)
+            image.delete()
+        for image in images:
+            ListingImage.objects.create(listing=listing, image=image)
+    translate_listing(listing)
+    return listing
 
 
 @login_required
 def create_listing(request):
     host_profile = get_object_or_404(HostProfile, user=request.user)
+    kind = request.POST.get("kind") or request.GET.get("kind")
+    if kind not in RentalListing.Kind.values:
+        # Step 1: the provider picks "home" or "car" before seeing any fields.
+        return render(request, "core/provider_listing_form.html", {
+            "form": None, "host_profile": host_profile, "kind_choices": RentalListing.Kind.choices,
+        })
     if request.method == "POST":
-        form = RentalListingForm(request.POST, request.FILES)
+        form = RentalListingForm(request.POST, request.FILES, kind=kind, auto_translate=translation_enabled())
         if form.is_valid():
-            images = form.cleaned_data["image_uploads"]
-            listing = form.save(commit=False)
-            listing.owner = request.user
-            listing.is_active = True
-            listing.full_clean()
-            with transaction.atomic():
-                listing.save()
-                for image in images:
-                    ListingImage.objects.create(listing=listing, image=image)
+            _save_listing_form(form, owner=request.user)
             messages.success(request, "E'loningiz yaratildi.")
             return redirect("provider-dashboard")
     else:
-        form = RentalListingForm()
+        form = RentalListingForm(kind=kind, auto_translate=translation_enabled())
     return render(request, "core/provider_listing_form.html", {
         "form": form,
         "host_profile": host_profile,
+    })
+
+
+@login_required
+def edit_listing(request, listing_id):
+    host_profile = get_object_or_404(HostProfile, user=request.user)
+    listing = get_object_or_404(
+        RentalListing.objects.prefetch_related("images"), pk=listing_id, owner=request.user,
+    )
+    form = RentalListingForm(
+        request.POST or None, request.FILES or None, instance=listing, auto_translate=translation_enabled(),
+    )
+    if request.method == "POST" and form.is_valid():
+        _save_listing_form(form)
+        messages.success(request, "E'lon yangilandi.")
+        return redirect("provider-dashboard")
+    return render(request, "core/provider_listing_form.html", {
+        "form": form,
+        "host_profile": host_profile,
+        "listing": listing,
     })
 
 

@@ -9,7 +9,7 @@
   <div class="chat-inbox">
     {% for conversation in conversations %}
     <a class="chat-inbox-item" href="{% url 'chat-room' conversation.pk %}">
-      <div><strong>{{ conversation.listing.title }}</strong><span>{% if conversation.customer_id == request.user.pk %}{{ conversation.provider.get_full_name|default:conversation.provider.username }}{% else %}{{ conversation.customer.get_full_name|default:conversation.customer.username }}{% endif %}</span></div>
+      <div><strong>{% localized_title conversation.listing %}</strong><span data-no-translate="true">{% if conversation.customer_id == request.user.pk %}{{ conversation.provider.get_full_name|default:conversation.provider.username }}{% else %}{{ conversation.customer.get_full_name|default:conversation.customer.username }}{% endif %}</span></div>
       <span class="chat-inbox-time">{{ conversation.updated_at|date:'d.m.Y H:i' }}</span>
     </a>
     {% empty %}

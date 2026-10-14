@@ -7,7 +7,7 @@ from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
@@ -33,6 +33,8 @@ from .telegram import notify_booking_parties
 User = get_user_model()
 
 
+# Keep tests offline and independent of a developer's local .env secrets.
+@override_settings(TELEGRAM_BOT_TOKEN="", OPENAI_API_KEY="", PUBLIC_SITE_URL="")
 class StartAppBaseTest(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(username="demo-user", password="SafePass123!", email="demo@example.com")
@@ -903,6 +905,7 @@ class ProviderWorkflowTests(StartAppBaseTest):
         self.home.refresh_from_db()
         self.assertEqual(self.home.availability_status, RentalListing.AvailabilityStatus.ACTIVE)
 
+    @override_settings(PUBLIC_SITE_URL="")
     def test_booking_telegram_notice_includes_listing_image_price_duration_total_and_link(self):
         self.home.legacy_image_url = "https://rentora.example/listing.jpg"
         self.home.save(update_fields=["legacy_image_url"])
@@ -926,6 +929,227 @@ class ProviderWorkflowTests(StartAppBaseTest):
             self.assertIn("500,000 so'm", payload["caption"])
             self.assertIn("Bron so'rovi:", payload["caption"])
             self.assertIn("https://rentora.example/listing/test-apartment", payload["caption"])
+
+
+    def _link_both_telegrams(self):
+        for user, phone, telegram_id in (
+            (self.user, "+998901234567", "1001"),
+            (self.provider, "+998901234568", "1002"),
+        ):
+            account = TelegramAccount.objects.create(
+                phone_number=phone, telegram_user_id=telegram_id, chat_id=telegram_id,
+            )
+            UserProfile.objects.create(user=user, phone_number=phone, telegram_account=account)
+
+    def _add_photo(self, fmt="PNG", name="photo.png"):
+        data = BytesIO()
+        Image.new("RGB", (40, 30), color="blue").save(data, format=fmt)
+        return ListingImage.objects.create(
+            listing=self.home, image=SimpleUploadedFile(name, data.getvalue()),
+        )
+
+    @override_settings(PUBLIC_SITE_URL="")
+    def test_uploaded_photo_is_uploaded_to_telegram_as_jpeg_instead_of_a_url(self):
+        self._link_both_telegrams()
+        with TemporaryDirectory() as media_root, override_settings(MEDIA_ROOT=media_root):
+            self._add_photo()
+            with patch("core.telegram._call_multipart") as upload, patch("core.telegram._call") as call:
+                notify_booking_parties(self.booking.pk, "requested", "http://127.0.0.1:8000")
+        self.assertEqual(upload.call_count, 2)
+        call.assert_not_called()
+        method, fields, file_field, filename, content = upload.call_args.args
+        self.assertEqual((method, file_field, filename), ("sendPhoto", "photo", "listing.jpg"))
+        self.assertTrue(content.startswith(b"\xff\xd8"))  # JPEG magic bytes
+        self.assertIn("Test apartment", fields["caption"])
+
+    @override_settings(PUBLIC_SITE_URL="")
+    def test_failed_photo_upload_still_delivers_the_text_notice(self):
+        from .telegram import TelegramError
+        self._link_both_telegrams()
+        with TemporaryDirectory() as media_root, override_settings(MEDIA_ROOT=media_root):
+            self._add_photo()
+            with patch("core.telegram._call_multipart", side_effect=TelegramError("rejected")), \
+                    patch("core.telegram._call") as call:
+                notify_booking_parties(self.booking.pk, "requested")
+        self.assertEqual(call.call_count, 2)
+        texts = {sent.args[1]["chat_id"]: sent.args[1]["text"] for sent in call.call_args_list}
+        self.assertTrue(all(sent.args[0] == "sendMessage" for sent in call.call_args_list))
+        self.assertIn("Yangi bron so'rovi", texts["1002"])
+        self.assertIn("ijaraga beruvchiga yuborildi", texts["1001"])
+
+    def test_provider_can_reject_a_pending_booking_and_both_sides_are_notified(self):
+        self.client.force_login(self.provider)
+        with patch("core.views.notify_booking_parties") as notify, self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(reverse("provider-booking-action", args=[self.booking.pk, "reject"]))
+        self.assertRedirects(response, reverse("provider-dashboard"))
+        self.booking.refresh_from_db()
+        self.assertEqual(self.booking.status, Booking.Status.CANCELLED)
+        self.assertEqual(notify.call_args.args[:2], (self.booking.pk, "rejected"))
+
+    def test_customer_cannot_reject_through_provider_action(self):
+        self.client.force_login(self.user)
+        response = self.client.post(reverse("provider-booking-action", args=[self.booking.pk, "reject"]))
+        self.assertEqual(response.status_code, 404)
+        self.booking.refresh_from_db()
+        self.assertEqual(self.booking.status, Booking.Status.PENDING)
+
+    def test_cash_booking_without_linked_telegram_warns_the_customer(self):
+        self.client.force_login(self.user)
+        self.booking.delete()
+        with patch("core.views.notify_booking_parties"):
+            response = self.client.post(reverse("create-booking", args=[self.home.slug]), {
+                "check_in": self.tomorrow, "check_out": self.day_after, "guests": 1, "payment_method": "cash",
+            }, follow=True)
+        self.assertContains(response, "Telegram xabarlarini olish uchun")
+
+
+class ProviderListingFormTests(StartAppBaseTest):
+    def setUp(self):
+        super().setUp()
+        self.provider = User.objects.create_user(username="host", password="test-pass")
+        HostProfile.objects.create(user=self.provider, display_name="Host")
+        self.client.force_login(self.provider)
+        self.region = Region.objects.get(pk=14)
+        self.district = District.objects.filter(region=self.region).first()
+        self.media = TemporaryDirectory()
+        self.media_override = override_settings(MEDIA_ROOT=self.media.name, OPENAI_API_KEY="")
+        self.media_override.enable()
+
+    def tearDown(self):
+        self.media_override.disable()
+        self.media.cleanup()
+        super().tearDown()
+
+    def _png(self, name="p.png"):
+        data = BytesIO()
+        Image.new("RGB", (4, 4), color="red").save(data, format="PNG")
+        return SimpleUploadedFile(name, data.getvalue(), content_type="image/png")
+
+    def _common(self, kind):
+        return {
+            "kind": kind, "title": "Yangi e'lon", "title_ru": "", "title_en": "",
+            "region": self.region.pk, "district": self.district.pk, "address": "Markaz",
+            "description": "Tavsif", "description_ru": "", "description_en": "",
+            "price_per_day": "200000", "capacity": "4", "image_uploads": self._png(),
+        }
+
+    def test_listing_type_is_chosen_before_any_field_is_shown(self):
+        response = self.client.get(reverse("provider-create-listing"))
+        self.assertContains(response, "Nimani ijaraga berasiz?")
+        self.assertContains(response, "?kind=home")
+        self.assertContains(response, "?kind=car")
+        self.assertNotContains(response, 'name="title"')
+
+    def test_home_form_shows_only_home_fields(self):
+        response = self.client.get(reverse("provider-create-listing"), {"kind": "home"})
+        self.assertContains(response, 'name="bedrooms"')
+        self.assertContains(response, 'name="bathrooms"')
+        self.assertNotContains(response, 'name="brand"')
+        self.assertNotContains(response, 'name="transmission"')
+        self.assertContains(response, "Mehmonlar soni")
+
+    def test_car_form_shows_only_car_fields(self):
+        response = self.client.get(reverse("provider-create-listing"), {"kind": "car"})
+        self.assertContains(response, 'name="brand"')
+        self.assertContains(response, 'name="year"')
+        self.assertNotContains(response, 'name="bedrooms"')
+        self.assertContains(response, "O&#x27;rindiqlar soni")
+        self.assertNotContains(response, 'value="na"')
+
+    def test_car_listing_requires_car_details_and_ignores_home_fields(self):
+        response = self.client.post(reverse("provider-create-listing"), self._common("car"))
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(RentalListing.objects.filter(title="Yangi e'lon").exists())
+        data = {**self._common("car"), "brand": "Chevrolet", "transmission": "automatic", "year": "2022", "bedrooms": "3"}
+        response = self.client.post(reverse("provider-create-listing"), data)
+        self.assertRedirects(response, reverse("provider-dashboard"))
+        listing = RentalListing.objects.get(title="Yangi e'lon")
+        self.assertEqual((listing.kind, listing.brand, listing.year, listing.bedrooms), ("car", "Chevrolet", 2022, None))
+
+    def test_home_listing_clears_car_fields(self):
+        data = {**self._common("home"), "bedrooms": "2", "bathrooms": "1", "brand": "BMW", "year": "2020"}
+        self.assertRedirects(self.client.post(reverse("provider-create-listing"), data), reverse("provider-dashboard"))
+        listing = RentalListing.objects.get(title="Yangi e'lon")
+        self.assertEqual((listing.brand, listing.year, listing.transmission), ("", None, "na"))
+
+    def test_owner_can_edit_listing_and_remove_a_photo_but_others_cannot(self):
+        data = {**self._common("home"), "bedrooms": "2", "bathrooms": "1"}
+        self.client.post(reverse("provider-create-listing"), data)
+        listing = RentalListing.objects.get(title="Yangi e'lon")
+        ListingImage.objects.create(listing=listing, image=self._png("second.png"))
+        first_photo = listing.images.first()
+        edit_url = reverse("provider-edit-listing", args=[listing.pk])
+        self.assertContains(self.client.get(edit_url), 'name="remove_images"')
+        data.pop("image_uploads")
+        response = self.client.post(edit_url, {**data, "title": "Yangilangan uy", "remove_images": [first_photo.pk]})
+        self.assertRedirects(response, reverse("provider-dashboard"))
+        listing.refresh_from_db()
+        self.assertEqual(listing.title, "Yangilangan uy")
+        self.assertEqual(listing.images.count(), 1)
+        self.assertFalse(ListingImage.objects.filter(pk=first_photo.pk).exists())
+
+        self.client.force_login(self.user)
+        self.assertEqual(self.client.get(edit_url).status_code, 404)
+
+    def test_cannot_remove_the_last_photo(self):
+        data = {**self._common("home"), "bedrooms": "2", "bathrooms": "1"}
+        self.client.post(reverse("provider-create-listing"), data)
+        listing = RentalListing.objects.get(title="Yangi e'lon")
+        data.pop("image_uploads")
+        response = self.client.post(reverse("provider-edit-listing", args=[listing.pk]), {
+            **data, "remove_images": [listing.images.first().pk],
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(listing.images.count(), 1)
+
+    def test_missing_translations_are_filled_automatically(self):
+        translated = {
+            "title_ru": "Новое объявление", "title_en": "New listing",
+            "description_ru": "Описание", "description_en": "Description",
+        }
+        with override_settings(OPENAI_API_KEY="test-key"), \
+                patch("core.listing_translation._request_translations", return_value=translated) as request:
+            data = {**self._common("home"), "bedrooms": "2", "bathrooms": "1", "title_en": "My own title"}
+            self.client.post(reverse("provider-create-listing"), data)
+        request.assert_called_once_with("Yangi e'lon", "Tavsif")
+        listing = RentalListing.objects.get(title="Yangi e'lon")
+        self.assertEqual(listing.title_ru, "Новое объявление")
+        self.assertEqual(listing.title_en, "My own title")  # Provider-entered text is never overwritten.
+        self.assertEqual(listing.description_en, "Description")
+
+    def test_translation_failure_does_not_block_listing_creation(self):
+        with override_settings(OPENAI_API_KEY="test-key"), \
+                patch("core.listing_translation.urlopen", side_effect=URLError("offline")):
+            data = {**self._common("home"), "bedrooms": "2", "bathrooms": "1"}
+            response = self.client.post(reverse("provider-create-listing"), data)
+        self.assertRedirects(response, reverse("provider-dashboard"))
+        self.assertEqual(RentalListing.objects.get(title="Yangi e'lon").title_ru, "")
+
+
+class LocalizedNameTests(StartAppBaseTest):
+    def test_region_and_district_options_carry_all_three_languages(self):
+        response = self.client.get(reverse("home"))
+        region = Region.objects.get(pk=14)
+        self.assertContains(
+            response,
+            f'data-localized-text data-uz="{region.name_uz}" data-ru="{region.name_ru}" data-en="{region.name_en}"',
+        )
+
+    def test_listing_location_and_title_are_localized(self):
+        region = Region.objects.get(pk=14)
+        district = District.objects.filter(region=region).first()
+        self.home.region, self.home.district = region, district
+        self.home.title_ru, self.home.title_en = "Тестовая квартира", "Test flat"
+        self.home.save()
+        response = self.client.get(reverse("listing-detail", args=[self.home.slug]))
+        self.assertContains(response, f'data-ru="{district.name_ru}"')
+        self.assertContains(response, 'data-ru="Тестовая квартира"')
+
+    def test_new_interface_texts_have_translation_entries(self):
+        source = (Path(__file__).resolve().parent / "static/core/i18n.js").read_text(encoding="utf-8")
+        for text in ("Nimani ijaraga berasiz?", "Bron so'rovlari", "Rad etish", "Hisob ma'lumotlari",
+                     "Avval viloyatni tanlang", "Ushbu maydon to'ldirilishi shart."):
+            self.assertIn(f'["{text}"', source)
 
 
 class ChatTests(StartAppBaseTest):
@@ -1008,6 +1232,39 @@ class ChatTests(StartAppBaseTest):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.json()["messages"]), 1)
         self.assertFalse(self.client.get(reverse("chat-unread-status")).json()["has_unread"])
+
+    def test_polling_messages_with_an_attachment_returns_its_media_url(self):
+        message = ChatMessage.objects.create(
+            conversation=self.conversation, sender=self.provider, text="",
+            attachment="chat/2026/10/photo.png", attachment_type=ChatMessage.AttachmentType.IMAGE,
+        )
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("chat-messages-api", args=[self.conversation.pk]), {"after": 0})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["messages"][0]["attachment_url"], reverse("chat-media", args=[message.pk]))
+
+
+class TelegramPollingTests(StartAppBaseTest):
+    def test_polling_command_removes_webhook_and_handles_updates(self):
+        update = {"update_id": 7, "message": {
+            "text": "/start", "from": {"id": 555}, "chat": {"id": 555, "type": "private"},
+        }}
+        calls = []
+
+        def fake_call(method, payload, timeout=20):
+            calls.append(method)
+            if method == "getUpdates":
+                if payload.get("offset") == 8:
+                    raise KeyboardInterrupt  # Stop the endless loop after the first batch.
+                return [update]
+            return True
+
+        with patch("core.management.commands.run_telegram_bot._call", side_effect=fake_call), \
+                patch("core.telegram._call", side_effect=fake_call):
+            with self.assertRaises(KeyboardInterrupt):
+                call_command("run_telegram_bot", stdout=StringIO())
+        self.assertEqual(calls[0], "deleteWebhook")
+        self.assertIn("sendMessage", calls)  # /start asked the user for their contact.
 
 
 class ApiTests(StartAppBaseTest):

@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 
 load_dotenv(BASE_DIR / ".env")
 load_dotenv(BASE_DIR.parent / ".env")
-CHAT_MEDIA_ROOT = Path(os.environ.get("CHAT_MEDIA_ROOT", BASE_DIR / "private-chat-media"))
+CHAT_MEDIA_ROOT = Path(os.environ.get("CHAT_MEDIA_ROOT") or BASE_DIR / "private-chat-media")
 PUBLIC_SITE_URL = os.environ.get("PUBLIC_SITE_URL", "").rstrip("/")
 
 SECRET_KEY = os.environ.get(
@@ -62,6 +62,10 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
+if not DEBUG:
+    # Serve collected static files straight from gunicorn in production.
+    MIDDLEWARE.insert(1, "whitenoise.middleware.WhiteNoiseMiddleware")
+
 ROOT_URLCONF = "config.urls"
 TEMPLATES = [{
     "BACKEND": "django.template.backends.django.DjangoTemplates",
@@ -82,7 +86,7 @@ ASGI_APPLICATION = "config.asgi.application"
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+        "NAME": Path(os.environ.get("SQLITE_PATH") or BASE_DIR / "db.sqlite3"),
         "OPTIONS": {"timeout": 20},
     }
 }
@@ -100,9 +104,20 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = "/static/"
-STATIC_ROOT = BASE_DIR / "staticfiles"
+STATIC_ROOT = Path(os.environ.get("STATIC_ROOT") or BASE_DIR / "staticfiles")
 MEDIA_URL = "/media/"
-MEDIA_ROOT = BASE_DIR / "media"
+MEDIA_ROOT = Path(os.environ.get("MEDIA_ROOT") or BASE_DIR / "media")
+# Without a separate web server (nginx), let Django serve uploaded listing photos.
+SERVE_MEDIA = DEBUG or os.environ.get("SERVE_MEDIA", "").strip().lower() in {"1", "true", "yes"}
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {
+        "BACKEND": (
+            "django.contrib.staticfiles.storage.StaticFilesStorage" if DEBUG
+            else "whitenoise.storage.CompressedManifestStaticFilesStorage"
+        ),
+    },
+}
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 LOGIN_URL = "login"
@@ -119,8 +134,20 @@ REST_FRAMEWORK = {
     ],
 }
 
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {"plain": {"format": "%(asctime)s %(levelname)s %(name)s: %(message)s"}},
+    "handlers": {"console": {"class": "logging.StreamHandler", "formatter": "plain"}},
+    "root": {"handlers": ["console"], "level": os.environ.get("DJANGO_LOG_LEVEL", "INFO")},
+}
+
 if not DEBUG:
     SECURE_CONTENT_TYPE_NOSNIFF = True
+    # Only mark cookies Secure when the site is actually served over HTTPS.
+    SESSION_COOKIE_SECURE = CSRF_COOKIE_SECURE = PUBLIC_SITE_URL.startswith("https://")
+    if os.environ.get("DJANGO_BEHIND_HTTPS_PROXY", "").strip().lower() in {"1", "true", "yes"}:
+        SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
     SESSION_COOKIE_HTTPONLY = True
     CSRF_COOKIE_HTTPONLY = False  # The same-origin frontend reads the token for AJAX requests.
     X_FRAME_OPTIONS = "DENY"

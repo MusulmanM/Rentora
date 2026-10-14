@@ -1,0 +1,14 @@
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+.env
+*.sqlite3
+*.sqlite3-journal
+media/
+private-chat-media/
+staticfiles/
+.git/
+.coverage
+htmlcov/
+*.bat

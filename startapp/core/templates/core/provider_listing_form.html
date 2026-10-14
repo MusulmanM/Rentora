@@ -1,19 +1,55 @@
 {% extends 'core/base.html' %}
 {% load static %}
-{% block title %}Yangi ijara e'loni — Rentora{% endblock %}
+{% block title %}{% if listing %}E'lonni tahrirlash{% else %}Yangi ijara e'loni{% endif %} — Rentora{% endblock %}
 {% block body_class %}auth-body{% endblock %}
 {% block content %}
 <div class="auth-shell provider-form-shell">
+  <div class="auth-language">{% include 'core/language_switcher.html' %}</div>
   <a class="brand auth-brand" href="{% url 'provider-dashboard' %}"><span class="brand-symbol"><i></i><i></i><i></i></span><span>Rentora</span></a>
   <div class="auth-card provider-form-card">
     <a class="auth-back-link" href="{% url 'provider-dashboard' %}">← Ijara beruvchi paneli</a>
-    <p class="section-kicker">YANGI E'LON</p><h1>Ijara variantini qo'shing.</h1>
+    {% if not form %}
+    <p class="section-kicker">YANGI E'LON · 1-QADAM</p><h1>Nimani ijaraga berasiz?</h1>
+    <p class="auth-subtitle">Avval e'lon turini tanlang — keyingi qadamda faqat shu turga kerakli maydonlar ko'rsatiladi.</p>
+    <div class="listing-kind-choice">
+      <a class="listing-kind-option" href="?kind=home">
+        <span class="listing-kind-icon" aria-hidden="true">⌂</span>
+        <b>Uy</b>
+        <small>Kvartira, hovli, dala hovli yoki mehmon uyi</small>
+        <span class="listing-kind-fields">Yotoq xonalari · Hammomlar · Mehmonlar soni</span>
+      </a>
+      <a class="listing-kind-option" href="?kind=car">
+        <span class="listing-kind-icon" aria-hidden="true">▱</span>
+        <b>Avtomobil</b>
+        <small>Yengil avtomobil, krossover yoki miniven</small>
+        <span class="listing-kind-fields">Marka · Uzatmalar qutisi · Yil · O'rindiqlar</span>
+      </a>
+    </div>
+    {% else %}
+    <p class="section-kicker">{% if listing %}E'LONNI TAHRIRLASH{% else %}YANGI E'LON · 2-QADAM{% endif %}</p>
+    <h1>{% if form.listing_kind == 'car' %}Avtomobil e'loni{% else %}Uy e'loni{% endif %}</h1>
+    {% if not listing %}<p class="auth-subtitle"><span class="listing-kind-badge">{% if form.listing_kind == 'car' %}▱ Avtomobil{% else %}⌂ Uy{% endif %}</span> <a class="listing-kind-change" href="{% url 'provider-create-listing' %}">Turini o'zgartirish</a></p>{% endif %}
     <form method="post" enctype="multipart/form-data" class="auth-form provider-listing-form">
       {% csrf_token %}
+      {{ form.kind }}
       {% if form.non_field_errors %}<div class="form-error-box">{{ form.non_field_errors }}</div>{% endif %}
-      {% for field in form %}<div class="form-field {% if field.name == 'description' or field.name == 'description_ru' or field.name == 'description_en' or field.name == 'image_uploads' %}form-field-wide{% endif %}"><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}{% if field.errors %}<small class="field-error">{{ field.errors|striptags }}</small>{% endif %}</div>{% endfor %}
-      <button class="btn btn-dark auth-submit" type="submit">E'lonni saqlash <span>→</span></button>
+      {% if form.kind.errors %}<div class="form-error-box">{{ form.kind.errors|striptags }}</div>{% endif %}
+      {% for title, fields in form.sections %}{% if fields %}
+      <h2 class="listing-form-section">{{ title }}</h2>
+      {% for field in fields %}
+      <div class="form-field {% if field.name == 'title' or field.name == 'address' or 'description' in field.name or field.name == 'image_uploads' or field.name == 'remove_images' %}form-field-wide{% endif %}">
+        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+        {% if field.name == 'remove_images' %}
+        <div class="listing-image-remove">{% for image in listing.images.all %}<label><input type="checkbox" name="remove_images" value="{{ image.pk }}"{% if image.pk|stringformat:'s' in field.value %} checked{% endif %}><img src="{{ image.image.url }}" alt="" loading="lazy"><span>O'chirish</span></label>{% endfor %}</div>
+        {% else %}{{ field }}{% endif %}
+        {% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}
+        {% if field.errors %}<small class="field-error">{{ field.errors|striptags }}</small>{% endif %}
+      </div>
+      {% endfor %}
+      {% endif %}{% endfor %}
+      <button class="btn btn-dark auth-submit" type="submit">{% if listing %}O'zgarishlarni saqlash{% else %}E'lonni saqlash{% endif %} <span>→</span></button>
     </form>
+    {% endif %}
   </div>
 </div>
 {% endblock %}

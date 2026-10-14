@@ -3,3 +3,5 @@ djangorestframework>=3.16,<3.19
 python-dotenv>=1.0,<2
 tzdata>=2024.2
 Pillow>=11.1
+whitenoise>=6.9,<7
+gunicorn>=23,<24; sys_platform != "win32"

@@ -18,7 +18,7 @@
 
 ## Django runtime tests
 
-`python manage.py test core`: **PASS** (45 tests). Coverage includes guest/access behavior, Telegram OTP registration and webhook checks, unique phone profiles, dependent Uzbekistan region/district filtering, provider onboarding and listing/photo uploads, admin contact messages, gallery rendering and admin image previews, cash booking creation, automatic online checkout without admin approval, OpenAI-backed rental filtering/sorting and server-side price calculations, reservation conflicts, Click callbacks, Payme Merchant API callbacks, and the booking/API flows.
+`python manage.py test core`: **PASS** (85 tests, offline: Telegram/OpenAI keys from `.env` are disabled during tests). Coverage includes the home/car-first listing form and listing editing, Telegram photo upload with text fallback, provider booking rejection, automatic listing translation, localized region/district names, Telegram long polling, guest/access behavior, Telegram OTP registration and webhook checks, unique phone profiles, dependent Uzbekistan region/district filtering, provider onboarding and listing/photo uploads, admin contact messages, gallery rendering and admin image previews, cash booking creation, automatic online checkout without admin approval, OpenAI-backed rental filtering/sorting and server-side price calculations, reservation conflicts, Click callbacks, Payme Merchant API callbacks, and the booking/API flows.
 
 OpenAI, Click, and Payme credentials are not present in this environment, so external AI and live payment provider requests are not exercised. Configure OpenAI and sandbox merchant credentials before attempting provider end-to-end tests. From the project folder run:
 

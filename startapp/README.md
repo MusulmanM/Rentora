@@ -86,15 +86,17 @@ python manage.py set_telegram_webhook https://<ngrok-yoki-sayt-domeni>/telegram/
 
 Webhook buyrug'i bot tokeni va secret'ni Django sozlamalaridan oladi; ularni terminal buyrug'iga yoki chatga yozmang. PowerShell'da vaqtinchalik environment o'zgaruvchisi kerak bo'lsa, sintaksis `$env:DJANGO_ALLOWED_HOSTS = "127.0.0.1,localhost,<domen>"`; `DJANGO_ALLOWED_HOSTS=...` ko'rinishidagi oddiy yozuv PowerShell buyrug'i emas. `.env` o'zgargach Django serverini qayta ishga tushiring; ngrok domeni o'zgarsa webhook'ni ham qayta sozlang.
 
-`TELEGRAM_BOT_USERNAME` bot havolasidagi `@` belgisiz nomdir. Foydalanuvchi avval botni ochib `/start` yuboradi va bot so'ragan Telegram kontaktini o'zi ulashadi. Saytdagi ro'yxatdan o'tish shu kontakt bilan bog'langan raqamga 10 daqiqalik, 5 urinishli OTP kod yuboradi; kodni qayta so'rash 60 soniyada bir martadan cheklangan. Telegram webhook xususiy chatdagi va jo'natuvchining o'ziga tegishli kontaktlarni qabul qiladi. Mavjud akkaunt egalari profilidan telefonini shu usulda tasdiqlashi mumkin. Bron yuborilganda, tasdiqlanganda, bekor qilinganda va mahsulot topshirilganda mijoz hamda ijaraga beruvchiga rasm (ommaviy HTTPS manzili bo'lsa), nom, narx, muddat, jami summa va so'rov vaqti yuboriladi. Xabar olish uchun ikkala tomon ham oldin botga `/start` yuborgan bo'lishi kerak.
+`TELEGRAM_BOT_USERNAME` bot havolasidagi `@` belgisiz nomdir. Foydalanuvchi avval botni ochib `/start` yuboradi va bot so'ragan Telegram kontaktini o'zi ulashadi. Saytdagi ro'yxatdan o'tish shu kontakt bilan bog'langan raqamga 10 daqiqalik, 5 urinishli OTP kod yuboradi; kodni qayta so'rash 60 soniyada bir martadan cheklangan. Telegram webhook xususiy chatdagi va jo'natuvchining o'ziga tegishli kontaktlarni qabul qiladi. Mavjud akkaunt egalari profilidan telefonini shu usulda tasdiqlashi mumkin. Bron yuborilganda, tasdiqlanganda, bekor qilinganda va mahsulot topshirilganda mijoz hamda ijaraga beruvchiga rasm (fayl botga to'g'ridan-to'g'ri JPEG qilib yuklanadi, shuning uchun localhost/ngrok'da ham ishlaydi; rasm yuborilmasa matnli xabar baribir boradi), nom, narx, muddat, jami summa va so'rov vaqti yuboriladi. Xabar olish uchun ikkala tomon ham oldin botga `/start` yuborgan va saytda telefonini tasdiqlagan bo'lishi kerak; tasdiqlanmagan mijozga bron qilganda shu haqida ogohlantirish chiqadi.
+
+**Webhook o'rniga polling.** Saytda ommaviy HTTPS domen bo'lmasa (masalan, faqat IP manzil), botni `python manage.py run_telegram_bot` bilan ishga tushiring. Buyruq webhook'ni o'chiradi va yangilanishlarni long polling orqali oladi. Telegram bir vaqtda faqat bittasiga ruxsat beradi: polling ishlayotganda ngrok webhook ishlamaydi; qaytish uchun pollingni to'xtatib, `set_telegram_webhook` buyrug'ini qayta bajaring.
 
 ### Hudud filtrlari va ijara beruvchi kabineti
 
 Viloyat, shahar va tumanlar ro'yxati migratsiya orqali bazaga yuklanadi; ma'lumotlar 14 ta viloyat/respublika/shahar va 209 ta shahar/tuman yozuvini o'z ichiga oladi. Manba: [`Ibratbek/regions-districts-json`](https://github.com/Ibratbek/regions-districts-json). Eski e'lonlardagi taniladigan shahar qiymatlari migratsiyada mos hududga bog'lanadi.
 
-Telefon tasdiqlangan foydalanuvchi profilidagi **Ijara beruvchi sifatida ro'yxatdan o'tish** tugmasini tanlab, shu akkauntini ijara beruvchi profiliga aylantiradi. Qayta foydalanuvchi akkaunti yaratilmaydi. Keyin e'lon turini, hududini, manzil va shartlarini to'ldirib, 10 tagacha rasmni yuklashi mumkin. Ijara beruvchi kabinetidan e'lonni **Faol** yoki **Remont** holatiga o'tkazish mumkin; remontdagi e'lon katalogda ko'rinmaydi. E'lon egasi o'z mahsulotini bron qila olmaydi.
+Telefon tasdiqlangan foydalanuvchi profilidagi **Ijara beruvchi sifatida ro'yxatdan o'tish** tugmasini tanlab, shu akkauntini ijara beruvchi profiliga aylantiradi. Qayta foydalanuvchi akkaunti yaratilmaydi. E'lon qo'shishda avval **Uy** yoki **Avtomobil** tanlanadi; keyingi qadamda faqat shu turga kerakli maydonlar chiqadi (uy: yotoq xonalari, hammomlar, mehmonlar soni; avtomobil: marka, uzatmalar qutisi, yil, o'rindiqlar) va ular majburiy tekshiriladi. Keyin hudud, manzil, narx va 10 tagacha rasm kiritiladi. E'lonni keyin **Tahrirlash** orqali o'zgartirish, rasm qo'shish yoki o'chirish mumkin. Ijara beruvchi kabinetidan e'lonni **Faol** yoki **Remont** holatiga o'tkazish mumkin; remontdagi e'lon katalogda ko'rinmaydi. E'lon egasi o'z mahsulotini bron qila olmaydi.
 
-Bron so'rovida bosilgan sana/vaqt va narx saqlanadi. Naqd buyurtma ijaraga beruvchiga darhol so'rov bo'lib boradi; online buyurtma to'lovdan keyin so'rovga aylanadi. Ijaraga beruvchi avval **Tasdiqlayman**, keyin mijozga topshirganda **Mahsulot ijaraga topshirildi** tugmasini bosadi. Faol bron qilingan e'lon boshqa foydalanuvchilardan yashiriladi; bekor qilinsa yoki `check_out` muddati o'tsa qayta ko'rinadi.
+Bron so'rovida bosilgan sana/vaqt va narx saqlanadi. Naqd buyurtma ijaraga beruvchiga darhol so'rov bo'lib boradi; online buyurtma to'lovdan keyin so'rovga aylanadi. Ijaraga beruvchi avval **Tasdiqlayman**, keyin mijozga topshirganda **Mahsulot ijaraga topshirildi** tugmasini bosadi; mos kelmagan so'rovni **Rad etish** mumkin (mijozga Telegram xabari boradi). Faol bron qilingan e'lon boshqa foydalanuvchilardan yashiriladi; bekor qilinsa yoki `check_out` muddati o'tsa qayta ko'rinadi.
 
 Foydalanuvchilar e'lon sahifasidan telefon, Telegram yoki sayt chat orqali bog'lanishi mumkin. Chat matn, rasm, audio fayl va brauzer/mikrofon qo'llasa yozib olingan ovozli xabarni qo'llaydi. Chat fayllari `CHAT_MEDIA_ROOT` da (standart: `startapp/private-chat-media`) saqlanadi va faqat chat qatnashchilariga ko'rinadi; bu papkani web-serverda ommaviy media sifatida nashr qilmang.
 
@@ -110,6 +112,8 @@ OPENAI_MODEL=gpt-4o-mini
 ```
 
 AI barcha sahifalarda past-o'ng burchakdagi suzuvchi chat orqali ochiladi; u ijara qidiruvi/saralashi, narx hisob-kitobi va Rentora yordam savollariga javob beradi, murakkab savolni administratorlar navbatiga yuboradi. Ijara narxi serverda bazadagi narx asosida hisoblanadi. HTTP 401, 403, 404, 429 va so'rov xatolari foydalanuvchiga alohida tushuntiriladi. `.env` `startapp` papkasidan yoki repository rootidan yuklanadi. `OPENAI_API_KEY` bo'lmasa yoki yaroqsiz bo'lsa, yordamchi sozlash/xato ko'rsatmasini beradi. Kalitni repoga qo'shmang.
+
+Ijara beruvchi e'lonning ruscha/inglizcha nom va tavsifini bo'sh qoldirsa, ular shu OpenAI kaliti orqali avtomatik tarjima qilinadi (qo'lda kiritilgan tarjima o'zgartirilmaydi). Mavjud e'lonlarni to'ldirish: `python manage.py translate_listings`. Viloyat va tuman nomlari bazadagi uz/ru/en qiymatlardan tanlangan tilda ko'rsatiladi.
 
 Admin yangi e'lonida yoki ijara beruvchi kabinetida 10 tagacha haqiqiy rasm faylini yuklang (har biri 10 MB gacha). E'lon sahifasidagi asosiy rasm yoki kichik rasmlarni bosib, klaviaturadagi chap/o'ng tugmalarda galereyani ko'ring. Admin paneldagi rasm preview'ini bosib faylni alohida ochish mumkin. Mahalliy ishlab chiqishda rasmlar `startapp/media/` ichida saqlanadi. Production'da `MEDIA_ROOT` uchun doimiy disk yoki Django storage-compatible object storage sozlang.
 
@@ -154,6 +158,24 @@ Testlar bosh sahifa va til tanlagichni, filtrlarni, ro'yxatdan o'tishni, naqd br
 E'lon filtrlari: `kind=home` yoki `kind=car`, `city=Toshkent`, `region=<id>`, `district=<id>`, `q=...`, `check_in=YYYY-MM-DD`, `check_out=YYYY-MM-DD`. Masalan: `/api/listings/?kind=car&region=14` yoki `/api/listings/?region=14&district=218`.
 
 API Django session autentifikatsiyasi va CSRF himoyasidan foydalanadi.
+
+## Docker bilan ishga tushirish
+
+`startapp` papkasida `Dockerfile` va `docker-compose.yml` bor. Compose ikki konteyner ishga tushiradi: `web` (gunicorn + WhiteNoise, port `RENTORA_PORT`, standart `8090`) va `bot` (Telegram long polling). SQLite bazasi, e'lon rasmlari va chat fayllari `rentora-data` volume'ida (`/data`) saqlanadi; migratsiyalar `web` konteyneri ishga tushganda bajariladi.
+
+```bash
+cd startapp
+cp .env.example .env   # DJANGO_SECRET_KEY, DJANGO_DEBUG=0, DJANGO_ALLOWED_HOSTS, CSRF_TRUSTED_ORIGINS, PUBLIC_SITE_URL va kalitlarni kiriting
+docker compose up -d --build
+docker compose exec web python manage.py createsuperuser
+docker compose logs -f
+```
+
+Masalan, IP orqali: `DJANGO_ALLOWED_HOSTS=37.60.224.174`, `CSRF_TRUSTED_ORIGINS=http://37.60.224.174:8090`, `PUBLIC_SITE_URL=http://37.60.224.174:8090`. Domen va HTTPS (masalan, nginx/Caddy orqali) ulanganda `PUBLIC_SITE_URL`ni `https://...` qiling va `DJANGO_BEHIND_HTTPS_PROXY=1` qo'shing.
+
+### Docker'siz server (systemd user service)
+
+Serverda root/Docker bo'lmasa, xuddi shu loyiha virtual muhit bilan ishlaydi: `gunicorn config.wsgi:application --bind 0.0.0.0:8090` va alohida `python manage.py run_telegram_bot`. `.env`da `DJANGO_DEBUG=0`, `SERVE_MEDIA=1` hamda `SQLITE_PATH`, `MEDIA_ROOT`, `CHAT_MEDIA_ROOT`, `STATIC_ROOT` yo'llarini ko'rsating, so'ng `migrate` va `collectstatic` bajaring.
 
 ## Production oldidan
 

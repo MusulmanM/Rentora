@@ -8,7 +8,7 @@ from django.utils import timezone
 from PIL import Image, UnidentifiedImageError
 
 from .models import (
-    Booking, BookingOrder, ChatMessage, ContactMessage, District, HostProfile,
+    Booking, BookingOrder, ChatMessage, ContactMessage, District, HostProfile, ListingImage,
     PendingPhoneVerification, PendingRegistration, Region, RentalListing, UserProfile,
 )
 
@@ -195,7 +195,16 @@ class MultipleFileField(forms.FileField):
         return cleaned_files
 
 
-class DistrictSelect(forms.Select):
+class LocalizedRegionSelect(forms.Select):
+    def create_option(self, name, value, label, selected, index, subindex=None, attrs=None):
+        option = super().create_option(name, value, label, selected, index, subindex, attrs)
+        region = getattr(value, "instance", None)
+        if region:
+            option["attrs"].update(_localized_name_attrs(region))
+        return option
+
+
+class DistrictSelect(LocalizedRegionSelect):
     def create_option(self, name, value, label, selected, index, subindex=None, attrs=None):
         option = super().create_option(name, value, label, selected, index, subindex, attrs)
         district = getattr(value, "instance", None)
@@ -204,10 +213,52 @@ class DistrictSelect(forms.Select):
         return option
 
 
+def _localized_name_attrs(place):
+    return {
+        "data-localized-text": "",
+        "data-uz": place.name_uz,
+        "data-ru": place.name_ru or place.name_uz,
+        "data-en": place.name_en or place.name_uz,
+    }
+
+
+class RegionChoiceField(forms.ModelChoiceField):
+    def label_from_instance(self, obj):
+        return obj.name_uz
+
+
+# Fields that only make sense for one listing type. Everything else is shared.
+HOME_ONLY_FIELDS = ("bedrooms", "bathrooms")
+CAR_ONLY_FIELDS = ("brand", "transmission", "year")
+LISTING_KIND_COPY = {
+    RentalListing.Kind.HOME: {
+        "title_placeholder": "Masalan: Chilonzordagi 2 xonali kvartira",
+        "description_placeholder": "Xonalar, jihozlar, sharoitlar va qoidalar haqida yozing.",
+        "address_label": "Manzil",
+        "address_placeholder": "Ko'cha, uy raqami, mo'ljal",
+        "capacity_label": "Mehmonlar soni",
+        "details_title": "Uy tafsilotlari",
+    },
+    RentalListing.Kind.CAR: {
+        "title_placeholder": "Masalan: Chevrolet Cobalt, oq rang",
+        "description_placeholder": "Avtomobil holati, yoqilg'i turi, sharoitlar va ijara shartlari haqida yozing.",
+        "address_label": "Olib ketish manzili",
+        "address_placeholder": "Avtomobilni topshirish joyi",
+        "capacity_label": "O'rindiqlar soni",
+        "details_title": "Avtomobil tafsilotlari",
+    },
+}
+
+
 class RentalListingForm(forms.ModelForm):
     image_uploads = MultipleFileField(
         label="Rasmlar (10 tagacha, har biri 10 MB gacha)",
+        required=False,
         widget=MultipleFileInput(attrs={"class": "form-input", "accept": "image/*"}),
+    )
+    remove_images = forms.ModelMultipleChoiceField(
+        queryset=ListingImage.objects.none(), required=False,
+        label="O'chiriladigan rasmlar", widget=forms.CheckboxSelectMultiple,
     )
 
     class Meta:
@@ -217,27 +268,122 @@ class RentalListingForm(forms.ModelForm):
             "description", "description_ru", "description_en", "price_per_day", "capacity",
             "bedrooms", "bathrooms", "brand", "transmission", "year",
         )
+        field_classes = {"region": RegionChoiceField, "district": RegionChoiceField}
         labels = {
             "kind": "E'lon turi", "title": "Nomi", "title_ru": "Nomi (RU)", "title_en": "Nomi (EN)",
             "region": "Viloyat", "district": "Shahar / tuman", "address": "Manzil",
             "description": "Tavsif", "description_ru": "Tavsif (RU)", "description_en": "Tavsif (EN)",
+            "price_per_day": "Kunlik narx (so'm)", "bedrooms": "Yotoq xonalari", "bathrooms": "Hammomlar",
+            "brand": "Marka", "transmission": "Uzatmalar qutisi", "year": "Ishlab chiqarilgan yil",
         }
         widgets = {
             "description": forms.Textarea(attrs={"rows": 5}),
+            "description_ru": forms.Textarea(attrs={"rows": 3}),
+            "description_en": forms.Textarea(attrs={"rows": 3}),
+            "region": LocalizedRegionSelect(),
             "district": DistrictSelect(),
         }
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, kind=None, auto_translate=False, **kwargs):
         super().__init__(*args, **kwargs)
+        is_edit = bool(self.instance.pk)
+        if is_edit:
+            kind = self.instance.kind
+        elif self.is_bound:
+            kind = self.data.get("kind") or kind
+        self.listing_kind = kind if kind in RentalListing.Kind.values else None
+        self.is_edit = is_edit
         self.fields["district"].queryset = District.objects.select_related("region").all()
         self.fields["region"].queryset = Region.objects.all()
         region_id = self.data.get("region") or self.initial.get("region") or self.instance.region_id
         if region_id:
             self.fields["district"].queryset = District.objects.filter(region_id=region_id)
-        for name, field in self.fields.items():
-            field.widget.attrs.setdefault("class", "form-input")
+        self.fields["region"].empty_label = "Viloyatni tanlang"
+        self.fields["district"].empty_label = "Avval viloyatni tanlang"
+
+        if self.listing_kind:
+            self.initial["kind"] = self.listing_kind
+            self.fields["kind"].widget = forms.HiddenInput()
+            for name in (CAR_ONLY_FIELDS if self.listing_kind == RentalListing.Kind.HOME else HOME_ONLY_FIELDS):
+                del self.fields[name]
+            copy = LISTING_KIND_COPY[self.listing_kind]
+            self.fields["title"].widget.attrs["placeholder"] = copy["title_placeholder"]
+            self.fields["description"].widget.attrs["placeholder"] = copy["description_placeholder"]
+            self.fields["address"].label = copy["address_label"]
+            self.fields["address"].widget.attrs["placeholder"] = copy["address_placeholder"]
+            self.fields["capacity"].label = copy["capacity_label"]
+            self.fields["capacity"].help_text = ""
+            self.fields["capacity"].widget.attrs.update({"min": 1, "max": 50})
+            if not is_edit:
+                self.initial.setdefault("capacity", 5 if self.listing_kind == RentalListing.Kind.CAR else 2)
+            if self.listing_kind == RentalListing.Kind.HOME:
+                for name in HOME_ONLY_FIELDS:
+                    self.fields[name].required = True
+                    self.fields[name].widget.attrs.update({"min": 0, "max": 50})
+            else:
+                self.fields["brand"].required = True
+                self.fields["brand"].widget.attrs["placeholder"] = "Masalan: Chevrolet"
+                self.fields["transmission"].required = True
+                self.fields["transmission"].choices = [("", "Tanlang")] + [
+                    choice for choice in RentalListing.Transmission.choices
+                    if choice[0] != RentalListing.Transmission.NOT_APPLICABLE
+                ]
+                self.fields["year"].required = True
+                self.fields["year"].widget.attrs.update({"min": 1980, "max": timezone.localdate().year + 1})
+
+        if auto_translate:
+            for name in ("title_ru", "title_en", "description_ru", "description_en"):
+                self.fields[name].help_text = "Bo'sh qoldirsangiz, avtomatik tarjima qilinadi."
+        self.fields["price_per_day"].widget.attrs.update({"min": 1, "step": "1000"})
+        if is_edit:
+            self.fields["image_uploads"].label = "Yangi rasmlar qo'shish (ixtiyoriy)"
+            self.fields["remove_images"].queryset = self.instance.images.all()
+        else:
+            del self.fields["remove_images"]
+        for field in self.fields.values():
+            if not isinstance(field.widget, (forms.CheckboxSelectMultiple, forms.HiddenInput)):
+                field.widget.attrs.setdefault("class", "form-input")
         self.fields["region"].widget.attrs["data-location-region"] = ""
-        self.fields["district"].widget.attrs.update({"data-location-district": "", "data-placeholder": "Avval viloyatni tanlang"})
+        self.fields["district"].widget.attrs.update({
+            "data-location-district": "", "data-chosen-label": "Shahar yoki tumanni tanlang",
+        })
+
+    def sections(self):
+        """Group the bound fields so the template can render them under headings."""
+        if not self.listing_kind:
+            return []
+        groups = [
+            ("Asosiy ma'lumot", ("title", "description")),
+            ("Joylashuv", ("region", "district", "address")),
+            (LISTING_KIND_COPY[self.listing_kind]["details_title"], ("capacity", *(
+                HOME_ONLY_FIELDS if self.listing_kind == RentalListing.Kind.HOME else CAR_ONLY_FIELDS
+            ))),
+            ("Narx", ("price_per_day",)),
+            ("Tarjimalar (ixtiyoriy)", ("title_ru", "title_en", "description_ru", "description_en")),
+            ("Rasmlar", ("remove_images", "image_uploads")),
+        ]
+        return [
+            (title, [self[name] for name in names if name in self.fields])
+            for title, names in groups
+        ]
+
+    def clean_kind(self):
+        kind = self.cleaned_data.get("kind")
+        if self.listing_kind and kind != self.listing_kind:
+            raise ValidationError("E'lon turini o'zgartirib bo'lmaydi.")
+        return kind
+
+    def clean_year(self):
+        year = self.cleaned_data.get("year")
+        if year and not 1980 <= year <= timezone.localdate().year + 1:
+            raise ValidationError(f"Yilni 1980–{timezone.localdate().year + 1} oralig'ida kiriting.")
+        return year
+
+    def clean_price_per_day(self):
+        price = self.cleaned_data.get("price_per_day")
+        if price is not None and price <= 0:
+            raise ValidationError("Kunlik narx 0 dan katta bo'lishi kerak.")
+        return price
 
     def clean(self):
         cleaned = super().clean()
@@ -245,13 +391,27 @@ class RentalListingForm(forms.ModelForm):
         district = cleaned.get("district")
         if region and district and district.region_id != region.pk:
             self.add_error("district", "Tanlangan shahar yoki tuman viloyatga mos kelmaydi.")
-        if not cleaned.get("image_uploads"):
+        new_images = cleaned.get("image_uploads") or []
+        removed = cleaned.get("remove_images") or []
+        existing = self.instance.images.count() if self.instance.pk else 0
+        remaining = existing - len(removed) + len(new_images)
+        if remaining < 1:
             self.add_error("image_uploads", "E'lon uchun kamida bitta rasm yuklang.")
+        elif remaining > 10:
+            self.add_error("image_uploads", "Har bir e'lon uchun eng ko'p 10 ta rasm yuklash mumkin.")
         return cleaned
 
     def save(self, commit=True):
         listing = super().save(commit=False)
         listing.city = self.cleaned_data["district"].name_uz
+        # Drop values that belong to the other listing type.
+        if listing.kind == RentalListing.Kind.HOME:
+            listing.brand = ""
+            listing.transmission = RentalListing.Transmission.NOT_APPLICABLE
+            listing.year = None
+        else:
+            listing.bedrooms = None
+            listing.bathrooms = None
         if commit:
             listing.save()
             self.save_m2m()

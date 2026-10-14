@@ -4,21 +4,23 @@
 {% block content %}
 <header class="site-header wrap" data-unread-endpoint="{% url 'chat-unread-status' %}"><a class="brand" href="{% url 'home' %}"><span class="brand-symbol"><i></i><i></i><i></i></span><span>Rentora</span></a><nav class="main-nav" id="main-nav"><a href="{% url 'home' %}">Bosh sahifa</a><a href="{% url 'chat-inbox' %}">Chatlar<span class="unread-dot" data-unread-indicator role="img" aria-label="O'qilmagan yangi xabarlar"{% if not has_unread_chat_messages %} hidden{% endif %}></span></a><a href="{% url 'profile' %}">Profil</a></nav><div class="header-actions">{% include 'core/language_switcher.html' %}<a class="user-pill" href="{% url 'profile' %}" aria-label="Profil">{{ request.user.first_name|default:request.user.username|first|upper }}</a></div><button class="mobile-menu-button" data-menu-toggle aria-controls="main-nav" aria-label="Menyuni ochish" aria-expanded="false">☰</button></header>
 <main class="bookings-main wrap">
-  <div class="bookings-welcome"><div><p class="section-kicker">IJARA BERUVCHI KABINETI</p><h1>{{ host_profile.display_name }}</h1><p>E'lonlaringizni ko'ring va yangi ijara variantlarini joylang.</p></div><a class="btn btn-dark" href="{% url 'provider-create-listing' %}">＋ E'lon qo'shish</a></div>
+  <div class="bookings-welcome"><div><p class="section-kicker">IJARA BERUVCHI KABINETI</p><h1 data-no-translate="true">{{ host_profile.display_name }}</h1><p>E'lonlaringizni ko'ring va yangi ijara variantlarini joylang.</p></div><a class="btn btn-dark" href="{% url 'provider-create-listing' %}">＋ E'lon qo'shish</a></div>
+  {% if not provider_has_telegram %}<p class="provider-telegram-note">Yangi bron so'rovlari Telegram orqali keladi. Xabarlarni olish uchun <a href="{% url 'verify-profile-phone' %}">telefon raqamingizni tasdiqlang</a>.</p>{% endif %}
   <section class="provider-bookings">
     <h2>Bron so'rovlari</h2>
     {% for booking in provider_bookings %}
     <article class="my-booking-card provider-booking-card">
       <a class="my-booking-image" href="{% url 'listing-detail' booking.listing.slug %}"><img src="{{ booking.listing.image_url|default:'https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=600&q=80' }}" alt="{{ booking.listing.title }}"></a>
       <div class="my-booking-info"><div class="my-booking-topline"><span class="booking-type-label">BRON SO'ROVI</span><span class="booking-status status-{{ booking.status }}">{{ booking.get_status_display }}</span></div>
-        <h3>{{ booking.listing.title }}</h3><p>{{ booking.user.get_full_name|default:booking.user.username }}</p>
-        <div class="booking-date-row"><span><small>IJARA</small><b>{{ booking.check_in|date:'d.m.Y' }} — {{ booking.check_out|date:'d.m.Y' }}</b></span><span><small>MUDDAT</small><b>{{ booking.days }} kun</b></span><span><small>JAMI</small><b>{{ booking.total_price|money }} so'm</b></span></div>
+        <h3>{% localized_title booking.listing %}</h3><p data-no-translate="true">{{ booking.user.get_full_name|default:booking.user.username }}</p>
+        <div class="booking-date-row"><span><small>IJARA</small><b>{{ booking.check_in|date:'d.m.Y' }} — {{ booking.check_out|date:'d.m.Y' }}</b></span><span><small>MUDDAT</small><b>{{ booking.days }} kun</b></span><span><small>JAMI</small><b>{{ booking.total_price|money }} so'm</b></span><span><small>TO'LOV</small><b>{{ booking.get_payment_method_display }}</b></span></div>
         <small>Bron tugmasi bosilgan: {{ booking.requested_at|date:'d.m.Y H:i' }}</small>
       </div>
       <div class="my-booking-total">
         {% if booking.status == 'pending' %}<form method="post" action="{% url 'provider-booking-action' booking.pk 'confirm' %}">{% csrf_token %}<button class="btn btn-dark" type="submit">Tasdiqlayman</button></form>
         {% elif booking.status == 'confirmed' %}<form method="post" action="{% url 'provider-booking-action' booking.pk 'handover' %}" data-confirm="Mahsulotni mijozga topshirganingizni tasdiqlaysizmi?">{% csrf_token %}<button class="btn btn-dark" type="submit">Mahsulot ijaraga topshirildi</button></form>
         {% elif booking.status == 'handed_over' %}<strong>Mahsulot mijozda</strong>{% endif %}
+        {% if booking.status == 'pending' or booking.status == 'confirmed' %}<form method="post" action="{% url 'provider-booking-action' booking.pk 'reject' %}" data-confirm="Bron so'rovini rad etasizmi?">{% csrf_token %}<button class="btn btn-danger-outline" type="submit">Rad etish</button></form>{% endif %}
         <form method="post" action="{% url 'chat-start-booking' booking.pk %}">{% csrf_token %}<button class="btn btn-outline" type="submit">Mijoz bilan chat</button></form>
       </div>
     </article>
@@ -28,8 +30,9 @@
     {% for listing in listings %}
     <article class="listing-card">
       <a class="listing-image-wrap" href="{% url 'listing-detail' listing.slug %}"><img class="listing-image" src="{{ listing.primary_image_url|default:'https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=900&q=85' }}" alt="{{ listing.title }}"><span class="listing-kind">{% if listing.pk in rented_listing_ids %}Mijozda{% elif listing.availability_status == 'repair' %}Remont{% elif listing.is_active %}Faol{% else %}Yashirilgan{% endif %}</span></a>
-      <div class="listing-card-body"><div class="listing-location">{{ listing.district.name_uz|default:listing.city }}{% if listing.region %}, {{ listing.region.name_uz }}{% endif %}</div><h2 class="provider-listing-title"><a href="{% url 'listing-detail' listing.slug %}">{{ listing.title }}</a></h2><div class="listing-card-bottom"><strong>{{ listing.price_per_day|money }} so'm / kun</strong><a class="card-arrow" href="{% url 'listing-detail' listing.slug %}" aria-label="E'lonni ko'rish">↗</a></div>
+      <div class="listing-card-body"><div class="listing-location">{% listing_location listing %}</div><h2 class="provider-listing-title"><a href="{% url 'listing-detail' listing.slug %}">{% localized_title listing %}</a></h2><div class="listing-card-bottom"><strong>{{ listing.price_per_day|money }} so'm / kun</strong><a class="card-arrow" href="{% url 'listing-detail' listing.slug %}" aria-label="E'lonni ko'rish">↗</a></div>
         <form method="post" action="{% url 'provider-listing-availability' listing.pk %}" class="listing-availability-form">{% csrf_token %}<label for="listing-status-{{ listing.pk }}">Ijara holati</label><select id="listing-status-{{ listing.pk }}" name="status"><option value="active"{% if listing.availability_status == 'active' %} selected{% endif %}>Faol</option><option value="repair"{% if listing.availability_status == 'repair' %} selected{% endif %}>Remont</option></select><button class="btn btn-outline btn-small" type="submit">Saqlash</button></form>
+        <div class="provider-card-actions"><a class="btn btn-outline btn-small" href="{% url 'provider-edit-listing' listing.pk %}">✎ Tahrirlash</a></div>
       </div>
     </article>
     {% empty %}<div class="empty-results"><h3>Hozircha e'lon yo'q</h3><p>Birinchi e'loningizni rasm va ijara shartlari bilan qo'shing.</p></div>{% endfor %}

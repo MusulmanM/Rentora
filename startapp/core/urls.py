@@ -21,6 +21,7 @@ urlpatterns = [
     path("provider/listings/<int:listing_id>/availability/", views.update_listing_availability, name="provider-listing-availability"),
     path("provider/bookings/<int:booking_id>/<str:action>/", views.update_provider_booking, name="provider-booking-action"),
     path("provider/listings/add/", views.create_listing, name="provider-create-listing"),
+    path("provider/listings/<int:listing_id>/edit/", views.edit_listing, name="provider-edit-listing"),
     path("chats/", views.chat_inbox, name="chat-inbox"),
     path("chats/start/<slug:slug>/", views.start_chat, name="chat-start"),
     path("chats/start-booking/<int:booking_id>/", views.start_booking_chat, name="chat-start-booking"),

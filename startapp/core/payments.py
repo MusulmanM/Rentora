@@ -25,13 +25,14 @@ def payment_url(order, request):
         merchant_id = getattr(settings, "CLICK_MERCHANT_ID", "")
         if not service_id or not merchant_id or not getattr(settings, "CLICK_SECRET_KEY", ""):
             raise ValueError("Click to'lovini yoqish uchun CLICK_SERVICE_ID, CLICK_MERCHANT_ID va CLICK_SECRET_KEY sozlang.")
-        return f"{settings.CLICK_CHECKOUT_BASE_URL}?{urlencode({
-            'service_id': service_id,
-            'merchant_id': merchant_id,
-            'amount': order.total_price,
-            'transaction_param': order.reference,
-            'return_url': request.build_absolute_uri(reverse('my-bookings')),
-        })}"
+        query = urlencode({
+            "service_id": service_id,
+            "merchant_id": merchant_id,
+            "amount": order.total_price,
+            "transaction_param": order.reference,
+            "return_url": request.build_absolute_uri(reverse("my-bookings")),
+        })
+        return f"{settings.CLICK_CHECKOUT_BASE_URL}?{query}"
 
     merchant_id = getattr(settings, "PAYME_MERCHANT_ID", "")
     if not merchant_id or not getattr(settings, "PAYME_MERCHANT_KEY", ""):
