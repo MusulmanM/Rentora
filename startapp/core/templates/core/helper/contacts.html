@@ -1,0 +1,17 @@
+{% extends 'core/helper/base.html' %}
+{% block helper_title %}Forma xabarlari{% endblock %}
+{% block helper_content %}
+<div class="helper-head"><div><p class="section-kicker">KIRMAGAN FOYDALANUVCHILARDAN</p><h1>Forma xabarlari</h1></div></div>
+<p class="helper-muted helper-note">Saytga kirmagan foydalanuvchilar "Admin bilan bog'lanish" formasi orqali yuborgan xabarlar. Kirgan foydalanuvchilar to'g'ridan-to'g'ri chatda yozadi.</p>
+<section class="helper-card helper-list">
+  {% for item in page %}
+  <article class="helper-contact{% if not item.is_read %} is-unread{% endif %}">
+    <div class="helper-contact-head"><b data-no-translate="true">{{ item.subject }}</b><span class="helper-muted">{{ item.created_at|date:'d.m.Y H:i' }}</span></div>
+    <p class="helper-muted" data-no-translate="true">{{ item.name }}{% if item.email %} · <a href="mailto:{{ item.email }}">{{ item.email }}</a>{% endif %}</p>
+    <p data-no-translate="true">{{ item.message|linebreaksbr }}</p>
+    {% if not item.is_read %}<form method="post" action="{% url 'helper-contact-read' item.pk %}">{% csrf_token %}<button class="btn btn-outline btn-small" type="submit">Ko'rildi deb belgilash</button></form>{% endif %}
+  </article>
+  {% empty %}<p class="helper-muted">Xabarlar yo'q.</p>{% endfor %}
+</section>
+{% include 'core/partials/pagination.html' %}
+{% endblock %}

@@ -1,24 +1,17 @@
 from django.conf import settings
-from django.db.models import F, Q
 
-from .models import ChatMessage
+from .chat import has_unread_messages
 
 
 def ai_assistant(request):
     user = request.user
     has_unread_chat_messages = False
     if user.is_authenticated:
-        has_unread_chat_messages = ChatMessage.objects.filter(
-            Q(
-                conversation__customer=user,
-                pk__gt=F("conversation__customer_last_read_message_id"),
-            )
-            | Q(
-                conversation__provider=user,
-                pk__gt=F("conversation__provider_last_read_message_id"),
-            ),
-        ).exclude(sender=user).exists()
+        has_unread_chat_messages = has_unread_messages(user)
     return {
-        "ai_enabled": bool(getattr(settings, "OPENAI_API_KEY", "")),
+        "ai_enabled": bool(getattr(settings, "GEMINI_API_KEY", "")),
         "has_unread_chat_messages": has_unread_chat_messages,
+        "chat_max_upload_bytes": settings.CHAT_ATTACHMENT_MAX_BYTES,
+        "chat_max_upload_mb": settings.CHAT_ATTACHMENT_MAX_BYTES // (1024 * 1024),
+        "admin_url": settings.ADMIN_URL if user.is_authenticated and user.is_superuser else "",
     }

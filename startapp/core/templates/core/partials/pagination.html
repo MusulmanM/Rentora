@@ -1,0 +1,7 @@
+{% if page.paginator.num_pages > 1 %}
+<nav class="helper-pagination" aria-label="Sahifalar">
+  {% if page.has_previous %}<a href="?{% for key, value in request.GET.items %}{% if key != 'page' %}{{ key }}={{ value|urlencode }}&{% endif %}{% endfor %}page={{ page.previous_page_number }}{{ anchor }}">← Oldingi</a>{% endif %}
+  <span>{{ page.number }} / {{ page.paginator.num_pages }} · {{ page.paginator.count }} ta</span>
+  {% if page.has_next %}<a href="?{% for key, value in request.GET.items %}{% if key != 'page' %}{{ key }}={{ value|urlencode }}&{% endif %}{% endfor %}page={{ page.next_page_number }}{{ anchor }}">Keyingi →</a>{% endif %}
+</nav>
+{% endif %}

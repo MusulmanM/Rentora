@@ -5,11 +5,11 @@ from core.models import RentalListing
 
 
 class Command(BaseCommand):
-    help = "Fill missing Russian/English listing titles and descriptions with OpenAI."
+    help = "Fill missing Russian/English listing titles and descriptions with Gemini."
 
     def handle(self, *args, **options):
         if not translation_enabled():
-            raise CommandError("OPENAI_API_KEY sozlanmagan.")
+            raise CommandError("GEMINI_API_KEY sozlanmagan.")
         listings = [listing for listing in RentalListing.objects.all() if missing_translation_fields(listing)]
         if not listings:
             self.stdout.write("Barcha e'lonlar tarjima qilingan.")

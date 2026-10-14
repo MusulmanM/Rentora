@@ -16,7 +16,7 @@ COPY . .
 RUN DJANGO_DEBUG=0 DJANGO_SECRET_KEY=build-only python manage.py collectstatic --noinput \
     && useradd --create-home --uid 1000 rentora \
     && mkdir -p /data \
-    && chown -R rentora:rentora /data \
+    && chown -R rentora:rentora /data /app/staticfiles \
     && chmod +x docker-entrypoint.sh
 
 USER rentora
@@ -26,7 +26,8 @@ ENV DJANGO_DEBUG=0 \
     SQLITE_PATH=/data/db.sqlite3 \
     MEDIA_ROOT=/data/media \
     CHAT_MEDIA_ROOT=/data/chat-media \
-    SERVE_MEDIA=1
+    SERVE_MEDIA=1 \
+    CACHE_DIR=/data/cache
 
 VOLUME ["/data"]
 EXPOSE 8000
@@ -35,4 +36,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/', timeout=4)"
 
 ENTRYPOINT ["./docker-entrypoint.sh"]
-CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "3", "--timeout", "60", "--access-logfile", "-"]
+CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "3", "--worker-class", "gthread", "--threads", "4", "--timeout", "600", "--access-logfile", "-"]

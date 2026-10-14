@@ -3,11 +3,14 @@ import uuid
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.core.files.storage import FileSystemStorage
 from django.db import models
 from django.utils import timezone
 from django.utils.deconstruct import deconstructible
 from django.utils.text import slugify
+
+from .uploads import SAFE_CHAT_EXTENSIONS, randomized_upload_path
 
 
 @deconstructible
@@ -110,10 +113,35 @@ class PendingPhoneVerification(models.Model):
     attempts = models.PositiveSmallIntegerField(default=0)
 
 
+class UserAccount(models.Model):
+    """Public identity for every user: a stable UID and an optional avatar."""
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="account")
+    uid = models.UUIDField("UID", default=uuid.uuid4, unique=True, editable=False)
+    avatar = models.ImageField("Rasm", upload_to=randomized_upload_path("avatars"), blank=True)
+
+    class Meta:
+        verbose_name = "Foydalanuvchi hisobi"
+        verbose_name_plural = "Foydalanuvchi hisoblari"
+
+    def __str__(self):
+        return f"{self.user} — {self.uid}"
+
+
+def account_for(user):
+    account, _ = UserAccount.objects.get_or_create(user=user)
+    return account
+
+
 class HostProfile(models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="host_profile")
-    display_name = models.CharField("Ijara beruvchi nomi", max_length=120)
+    display_name = models.CharField("Kompaniya nomi", max_length=120)
+    logo = models.ImageField("Kompaniya logotipi", upload_to=randomized_upload_path("host-logos"), blank=True)
+    phone_number = models.CharField("Kompaniya telefoni", max_length=16, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    @property
+    def is_complete(self):
+        return bool(self.display_name and self.logo and self.phone_number)
 
     class Meta:
         verbose_name = "Ijara beruvchi"
@@ -244,7 +272,7 @@ class RentalListing(models.Model):
 
 class ListingImage(models.Model):
     listing = models.ForeignKey(RentalListing, on_delete=models.CASCADE, related_name="images")
-    image = models.ImageField("Rasm", upload_to="listing-images/%Y/%m/")
+    image = models.ImageField("Rasm", upload_to=randomized_upload_path("listing-images"))
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -254,6 +282,27 @@ class ListingImage(models.Model):
 
     def __str__(self):
         return f"{self.listing.title} — rasm {self.pk or 'yangi'}"
+
+
+class ListingReview(models.Model):
+    listing = models.ForeignKey(RentalListing, on_delete=models.CASCADE, related_name="reviews")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="listing_reviews")
+    rating = models.PositiveSmallIntegerField("Baho", validators=[MinValueValidator(1), MaxValueValidator(5)])
+    comment = models.TextField("Izoh", max_length=2000, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-updated_at"]
+        verbose_name = "Izoh va baho"
+        verbose_name_plural = "Izohlar va baholar"
+        constraints = [
+            models.UniqueConstraint(fields=["listing", "user"], name="core_review_listing_user_uniq"),
+            models.CheckConstraint(condition=models.Q(rating__gte=1, rating__lte=5), name="core_review_rating_range"),
+        ]
+
+    def __str__(self):
+        return f"{self.listing.title} — {self.rating}/5"
 
 
 class Booking(models.Model):
@@ -447,13 +496,31 @@ class PaymentTransaction(models.Model):
 
 
 class Conversation(models.Model):
-    listing = models.ForeignKey(RentalListing, on_delete=models.CASCADE, related_name="conversations")
+    """A chat. Listing chats link a customer and a provider; support chats link a user and the admin team."""
+
+    class Kind(models.TextChoices):
+        LISTING = "listing", "E'lon bo'yicha"
+        SUPPORT = "support", "Admin bilan"
+
+    class SupportStatus(models.TextChoices):
+        WAITING = "waiting", "Javob kutmoqda"
+        AI = "ai", "AI javob berdi"
+        ESCALATED = "escalated", "Admin kerak"
+        ANSWERED = "answered", "Admin javob berdi"
+
+    kind = models.CharField(max_length=10, choices=Kind.choices, default=Kind.LISTING)
+    listing = models.ForeignKey(
+        RentalListing, on_delete=models.CASCADE, related_name="conversations", null=True, blank=True,
+    )
     customer = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="rental_conversations",
     )
+    # Empty for support chats: any admin answers on behalf of the team.
     provider = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="provider_conversations",
+        null=True, blank=True,
     )
+    support_status = models.CharField(max_length=10, choices=SupportStatus.choices, blank=True)
     customer_last_read_message_id = models.PositiveBigIntegerField(default=0)
     provider_last_read_message_id = models.PositiveBigIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -463,9 +530,37 @@ class Conversation(models.Model):
         ordering = ["-updated_at"]
         constraints = [
             models.UniqueConstraint(fields=["listing", "customer"], name="core_chat_listing_customer_uniq"),
+            models.UniqueConstraint(
+                fields=["customer"], condition=models.Q(kind="support"), name="core_chat_one_support_per_user",
+            ),
         ]
+        indexes = [models.Index(fields=["kind", "support_status", "updated_at"], name="core_chat_support_idx")]
+
+    @property
+    def is_support(self):
+        return self.kind == self.Kind.SUPPORT
+
+    def is_participant(self, user):
+        if not getattr(user, "is_authenticated", False):
+            return False
+        if self.is_support:
+            return user.pk == self.customer_id or user.is_staff
+        return user.pk in (self.customer_id, self.provider_id)
+
+    def last_read_for(self, user):
+        """The newest message id this user has seen (admins share the support team's read marker)."""
+        if user.pk == self.customer_id:
+            return self.customer_last_read_message_id
+        return self.provider_last_read_message_id
+
+    def other_side_last_read(self, user):
+        if user.pk == self.customer_id:
+            return self.provider_last_read_message_id
+        return self.customer_last_read_message_id
 
     def __str__(self):
+        if self.is_support:
+            return f"Admin chat: {self.customer}"
         return f"{self.listing.title}: {self.customer} ↔ {self.provider}"
 
 
@@ -473,15 +568,31 @@ class ChatMessage(models.Model):
     class AttachmentType(models.TextChoices):
         IMAGE = "image", "Rasm"
         AUDIO = "audio", "Ovozli xabar"
+        VIDEO = "video", "Video"
 
     conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name="messages")
+    # Empty for messages written by the support AI.
     sender = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="rental_chat_messages",
+        null=True, blank=True,
     )
+    is_ai = models.BooleanField(default=False)
     text = models.TextField(blank=True, max_length=5000)
-    attachment = models.FileField(upload_to="chat/%Y/%m/", storage=chat_media_storage, blank=True)
+    attachment = models.FileField(upload_to=randomized_upload_path("chat", allowed=SAFE_CHAT_EXTENSIONS, fallback="bin"), storage=chat_media_storage, blank=True)
     attachment_type = models.CharField(max_length=10, choices=AttachmentType.choices, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    @property
+    def from_support_team(self):
+        """True for admin or AI messages in a support chat (shown to the user as "Rentora Admin")."""
+        return self.conversation.is_support and self.sender_id != self.conversation.customer_id
+
+    def display_sender(self, viewer=None):
+        if self.from_support_team and not (viewer is not None and viewer.is_staff):
+            return "Rentora Admin"
+        if self.is_ai or self.sender is None:
+            return "Rentora AI"
+        return self.sender.get_full_name() or self.sender.get_username()
 
     class Meta:
         ordering = ["created_at"]

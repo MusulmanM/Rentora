@@ -2,9 +2,23 @@
 {% load core_tags %}
 {% block title %}Ijara e'lonlarim — Rentora{% endblock %}
 {% block content %}
-<header class="site-header wrap" data-unread-endpoint="{% url 'chat-unread-status' %}"><a class="brand" href="{% url 'home' %}"><span class="brand-symbol"><i></i><i></i><i></i></span><span>Rentora</span></a><nav class="main-nav" id="main-nav"><a href="{% url 'home' %}">Bosh sahifa</a><a href="{% url 'chat-inbox' %}">Chatlar<span class="unread-dot" data-unread-indicator role="img" aria-label="O'qilmagan yangi xabarlar"{% if not has_unread_chat_messages %} hidden{% endif %}></span></a><a href="{% url 'profile' %}">Profil</a></nav><div class="header-actions">{% include 'core/language_switcher.html' %}<a class="user-pill" href="{% url 'profile' %}" aria-label="Profil">{{ request.user.first_name|default:request.user.username|first|upper }}</a></div><button class="mobile-menu-button" data-menu-toggle aria-controls="main-nav" aria-label="Menyuni ochish" aria-expanded="false">☰</button></header>
+<header class="site-header wrap" data-unread-endpoint="{% url 'chat-unread-status' %}"><a class="brand" href="{% url 'home' %}"><span class="brand-symbol"><i></i><i></i><i></i></span><span>Rentora</span></a><nav class="main-nav" id="main-nav"><a href="{% url 'home' %}">Bosh sahifa</a><a href="{% url 'chat-inbox' %}">Chatlar<span class="unread-dot" data-unread-indicator role="img" aria-label="O'qilmagan yangi xabarlar"{% if not has_unread_chat_messages %} hidden{% endif %}></span></a><a href="{% url 'profile' %}">Profil</a></nav><div class="header-actions">{% include 'core/language_switcher.html' %}<a class="user-pill" href="{% url 'profile' %}" aria-label="Profil">{% user_avatar request.user "user-pill-avatar" %}</a></div><button class="mobile-menu-button" data-menu-toggle aria-controls="main-nav" aria-label="Menyuni ochish" aria-expanded="false">☰</button></header>
 <main class="bookings-main wrap">
   <div class="bookings-welcome"><div><p class="section-kicker">IJARA BERUVCHI KABINETI</p><h1 data-no-translate="true">{{ host_profile.display_name }}</h1><p>E'lonlaringizni ko'ring va yangi ijara variantlarini joylang.</p></div><a class="btn btn-dark" href="{% url 'provider-create-listing' %}">＋ E'lon qo'shish</a></div>
+  <div class="company-banner">
+    {% if host_profile.logo %}<img class="company-logo-small" src="{{ host_profile.logo.url }}" alt="">{% else %}<span class="company-logo-small company-logo-placeholder" aria-hidden="true">⌂</span>{% endif %}
+    <div class="company-card-text"><b data-no-translate="true">{{ host_profile.display_name }}</b>{% if host_profile.phone_number %}<span data-no-translate="true">☎ {{ host_profile.phone_number }}</span>{% endif %}</div>
+    {% if not host_profile.is_complete %}<p class="provider-telegram-note">Kompaniya logotipi va telefon raqamini qo'shing — ular e'lonlaringiz sahifasida ko'rinadi.</p>{% endif %}
+    <a class="btn btn-outline btn-small" href="{% url 'provider-company' %}">✎ Kompaniya ma'lumotlari</a>
+  </div>
+  <form method="get" class="dashboard-filters" role="search">
+    <input type="search" name="q" value="{{ filters.q }}" placeholder="E'lon, marka yoki mijoz bo'yicha qidirish" aria-label="Qidirish">
+    <select name="kind" aria-label="E'lon turi"><option value="">Barcha turlar</option><option value="home"{% if filters.kind == 'home' %} selected{% endif %}>Uylar</option><option value="car"{% if filters.kind == 'car' %} selected{% endif %}>Avtomobillar</option></select>
+    <select name="status" aria-label="Ijara holati"><option value="">Barcha holatlar</option><option value="active"{% if filters.status == 'active' %} selected{% endif %}>Faol</option><option value="repair"{% if filters.status == 'repair' %} selected{% endif %}>Remont</option></select>
+    <select name="booking_status" aria-label="Bron holati"><option value="">Barcha bronlar</option><option value="pending"{% if filters.booking_status == 'pending' %} selected{% endif %}>Kutilmoqda</option><option value="confirmed"{% if filters.booking_status == 'confirmed' %} selected{% endif %}>Tasdiqlangan</option><option value="handed_over"{% if filters.booking_status == 'handed_over' %} selected{% endif %}>Mijozga topshirilgan</option></select>
+    <button class="btn btn-dark btn-small" type="submit">Qidirish</button>
+    {% if is_filtered %}<a class="filter-reset" href="{% url 'provider-dashboard' %}">Filtrlarni tozalash</a>{% endif %}
+  </form>
   {% if not provider_has_telegram %}<p class="provider-telegram-note">Yangi bron so'rovlari Telegram orqali keladi. Xabarlarni olish uchun <a href="{% url 'verify-profile-phone' %}">telefon raqamingizni tasdiqlang</a>.</p>{% endif %}
   <section class="provider-bookings">
     <h2>Bron so'rovlari</h2>
@@ -26,6 +40,8 @@
     </article>
     {% empty %}<p>Hozircha yangi bron so'rovlari yo'q.</p>{% endfor %}
   </section>
+  <h2 class="provider-section-title">E'lonlarim</h2>
+  <p class="dashboard-count">Ko'rsatilmoqda: {{ listings|length }} / {{ listing_total }}</p>
   <div class="listing-grid provider-listing-grid">
     {% for listing in listings %}
     <article class="listing-card">

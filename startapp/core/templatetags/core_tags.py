@@ -52,5 +52,25 @@ def listing_location(listing):
     else:
         location = listing.city  # Free text; the static dictionary translates common city names.
     if listing.region_id:
-        return format_html("{}, {}", location, place_name(listing.region))
-    return location
+        return format_html('<span class="place">{}, {}</span>', location, place_name(listing.region))
+    return format_html('<span class="place">{}</span>', location)
+
+
+@register.simple_tag
+def user_avatar(user, css_class="user-avatar"):
+    """The user's photo, or the first letter of their name on a coloured circle."""
+    account = getattr(user, "account", None)
+    if account is not None and account.avatar:
+        return format_html('<img class="{}" src="{}" alt="">', css_class, account.avatar.url)
+    initial = (user.first_name or user.get_username() or "?")[:1].upper()
+    return format_html('<span class="{} user-avatar-initial" aria-hidden="true">{}</span>', css_class, initial)
+
+
+@register.filter
+def stars(value):
+    """4.3 -> "★★★★☆" (rounded to whole stars)."""
+    try:
+        filled = max(0, min(5, round(float(value))))
+    except (TypeError, ValueError):
+        filled = 0
+    return "★" * filled + "☆" * (5 - filled)

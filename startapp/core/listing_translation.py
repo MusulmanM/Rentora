@@ -1,14 +1,14 @@
-"""Fill missing Russian/English listing copy with OpenAI, keeping provider-entered text untouched."""
+"""Fill missing Russian/English listing copy with Gemini, keeping provider-entered text untouched."""
 import json
 import logging
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
 
 from django.conf import settings
 
+from .gemini import chat_completion
+
 logger = logging.getLogger(__name__)
 
-_OPENAI_URL = "https://api.openai.com/v1/chat/completions"
 TRANSLATED_FIELDS = ("title_ru", "title_en", "description_ru", "description_en")
 _SCHEMA = {
     "type": "object",
@@ -19,7 +19,7 @@ _SCHEMA = {
 
 
 def translation_enabled():
-    return bool(getattr(settings, "OPENAI_API_KEY", ""))
+    return bool(getattr(settings, "GEMINI_API_KEY", ""))
 
 
 def missing_translation_fields(listing):
@@ -28,7 +28,6 @@ def missing_translation_fields(listing):
 
 def _request_translations(title, description):
     payload = {
-        "model": getattr(settings, "OPENAI_MODEL", "gpt-4o-mini"),
         "messages": [
             {
                 "role": "system",
@@ -49,14 +48,7 @@ def _request_translations(title, description):
             "json_schema": {"name": "listing_translation", "strict": True, "schema": _SCHEMA},
         },
     }
-    request = Request(
-        _OPENAI_URL,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Authorization": f"Bearer {settings.OPENAI_API_KEY}", "Content-Type": "application/json"},
-        method="POST",
-    )
-    with urlopen(request, timeout=30) as response:
-        result = json.loads(response.read())
+    result = chat_completion(payload, timeout=30)
     return json.loads(result["choices"][0]["message"]["content"])
 
 
@@ -68,7 +60,7 @@ def translate_listing(listing, save=True):
     try:
         translated = _request_translations(listing.title, listing.description)
     except HTTPError as exc:
-        logger.warning("Listing %s translation was rejected by OpenAI (HTTP %s).", listing.pk, exc.code)
+        logger.warning("Listing %s translation was rejected by Gemini (HTTP %s).", listing.pk, exc.code)
         return []
     except (URLError, TimeoutError, OSError) as exc:
         logger.warning("Listing %s translation failed: %s", listing.pk, type(exc).__name__)

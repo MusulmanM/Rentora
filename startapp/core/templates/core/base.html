@@ -7,14 +7,15 @@
   <title>{% block title %}Rentora — turar joy va avtomobil ijarasi{% endblock %}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{% static 'core/app.css' %}?v=20261013-nav5">
-  <link rel="stylesheet" href="{% static 'core/account.css' %}">
-  <link rel="stylesheet" href="{% static 'core/ai-assistant.css' %}?v=20261013-nav5">
+  <link rel="stylesheet" href="{% static 'core/app.css' %}?v=20261014-v3">
+  <link rel="stylesheet" href="{% static 'core/account.css' %}?v=20261014-v2">
+  <link rel="stylesheet" href="{% static 'core/ai-assistant.css' %}?v=20261014-v2">
   {% block extra_head %}{% endblock %}
 </head>
 <body class="{% block body_class %}{% endblock %}">
   <div class="toast-stack" aria-live="polite">{% if messages %}{% for message in messages %}<div class="toast toast-{{ message.tags|default:'info' }}">{{ message }}</div>{% endfor %}{% endif %}</div>
   {% block content %}{% endblock %}
+  {% block ai_widget %}
   <div class="ai-chat-widget" data-ai-widget data-enabled="{% if ai_enabled %}true{% else %}false{% endif %}">
     <button class="ai-chat-launcher" type="button" data-ai-open aria-controls="ai-chat-panel" aria-expanded="false" aria-label="Rentora AI panelini ochish">
       <span class="ai-robot-mark" aria-hidden="true"><i></i><i></i><b></b></span>
@@ -47,15 +48,16 @@
       <div class="ai-chat-disabled" data-ai-disabled>
         <span class="ai-disabled-icon" aria-hidden="true">⚙</span>
         <h3>AI yordamchi hozircha ishlamaydi</h3>
-        <p><span>Ijara bo'yicha qidiruvni yoqish uchun sayt ma'muri serverda</span> <code>OPENAI_API_KEY</code> <span>sozlash kerak.</span></p>
+        <p><span>Ijara bo'yicha qidiruvni yoqish uchun sayt ma'muri serverda</span> <code>GEMINI_API_KEY</code> <span>sozlash kerak.</span></p>
       </div>
       {% endif %}
     </section>
   </div>
-  <script src="{% static 'core/i18n.js' %}?v=20261013-nav5" defer></script>
-  <script src="{% static 'core/app.js' %}?v=20261013-nav5" defer></script>
-  <script src="{% static 'core/ai-assistant.js' %}?v=20261013-nav5" defer></script>
-  <script src="{% static 'core/chat-unread.js' %}?v=20261013-nav5" defer></script>
+  {% endblock %}
+  <script src="{% static 'core/i18n.js' %}?v=20261014-v2" defer></script>
+  <script src="{% static 'core/app.js' %}?v=20261014-v3" defer></script>
+  <script src="{% static 'core/ai-assistant.js' %}?v=20261014-v2" defer></script>
+  <script src="{% static 'core/chat-unread.js' %}?v=20261014-v2" defer></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

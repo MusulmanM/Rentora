@@ -104,16 +104,19 @@ Foydalanuvchilar e'lon sahifasidan telefon, Telegram yoki sayt chat orqali bog'l
 
 ### Rentora AI va e'lon rasmlari
 
-AI yordamchini yoqish uchun OpenAI API kalitini `.env` fayliga kiriting:
+AI Google Gemini orqali ishlaydi (OpenAI-mos endpoint). Kalitni (https://aistudio.google.com/apikey) `.env` fayliga kiriting:
 
 ```dotenv
-OPENAI_API_KEY=
-OPENAI_MODEL=gpt-4o-mini
+GEMINI_API_KEY=
+GEMINI_MODEL=gemini-3.1-flash-lite
+GEMINI_FALLBACK_MODELS=gemini-2.5-flash,gemini-3-flash-preview,gemini-3.8-flash,gemini-flash-latest
 ```
 
-AI barcha sahifalarda past-o'ng burchakdagi suzuvchi chat orqali ochiladi; u ijara qidiruvi/saralashi, narx hisob-kitobi va Rentora yordam savollariga javob beradi, murakkab savolni administratorlar navbatiga yuboradi. Ijara narxi serverda bazadagi narx asosida hisoblanadi. HTTP 401, 403, 404, 429 va so'rov xatolari foydalanuvchiga alohida tushuntiriladi. `.env` `startapp` papkasidan yoki repository rootidan yuklanadi. `OPENAI_API_KEY` bo'lmasa yoki yaroqsiz bo'lsa, yordamchi sozlash/xato ko'rsatmasini beradi. Kalitni repoga qo'shmang.
+Bepul Gemini kalitida har bir model uchun kunlik limit kichik (ba'zilarida kuniga ~20 so'rov) va modellar vaqti-vaqti bilan band bo'ladi (HTTP 503). Shuning uchun so'rov modellar zanjiri bo'ylab yuboriladi: model band bo'lsa yoki limiti tugasa, keyingisi ishlatiladi, limiti tugagan model esa qayta tiklanish vaqtigacha o'tkazib yuboriladi. Ko'p foydalanuvchi bo'lsa, Google AI Studio'da billing yoqing.
 
-Ijara beruvchi e'lonning ruscha/inglizcha nom va tavsifini bo'sh qoldirsa, ular shu OpenAI kaliti orqali avtomatik tarjima qilinadi (qo'lda kiritilgan tarjima o'zgartirilmaydi). Mavjud e'lonlarni to'ldirish: `python manage.py translate_listings`. Viloyat va tuman nomlari bazadagi uz/ru/en qiymatlardan tanlangan tilda ko'rsatiladi.
+AI barcha sahifalarda past-o'ng burchakdagi suzuvchi chat orqali ochiladi; u ijara qidiruvi/saralashi, narx hisob-kitobi va Rentora yordam savollariga javob beradi, murakkab savolni administratorlar navbatiga yuboradi. Ijara narxi serverda bazadagi narx asosida hisoblanadi. HTTP 401, 403, 404, 429 va so'rov xatolari foydalanuvchiga alohida tushuntiriladi. `.env` `startapp` papkasidan yoki repository rootidan yuklanadi. `GEMINI_API_KEY` bo'lmasa yoki yaroqsiz bo'lsa, yordamchi sozlash/xato ko'rsatmasini beradi. Kalitni repoga qo'shmang.
+
+Ijara beruvchi e'lonning ruscha/inglizcha nom va tavsifini bo'sh qoldirsa, ular shu Gemini kaliti orqali avtomatik tarjima qilinadi (qo'lda kiritilgan tarjima o'zgartirilmaydi). Mavjud e'lonlarni to'ldirish: `python manage.py translate_listings`. Viloyat va tuman nomlari bazadagi uz/ru/en qiymatlardan tanlangan tilda ko'rsatiladi.
 
 Admin yangi e'lonida yoki ijara beruvchi kabinetida 10 tagacha haqiqiy rasm faylini yuklang (har biri 10 MB gacha). E'lon sahifasidagi asosiy rasm yoki kichik rasmlarni bosib, klaviaturadagi chap/o'ng tugmalarda galereyani ko'ring. Admin paneldagi rasm preview'ini bosib faylni alohida ochish mumkin. Mahalliy ishlab chiqishda rasmlar `startapp/media/` ichida saqlanadi. Production'da `MEDIA_ROOT` uchun doimiy disk yoki Django storage-compatible object storage sozlang.
 
@@ -158,6 +161,30 @@ Testlar bosh sahifa va til tanlagichni, filtrlarni, ro'yxatdan o'tishni, naqd br
 E'lon filtrlari: `kind=home` yoki `kind=car`, `city=Toshkent`, `region=<id>`, `district=<id>`, `q=...`, `check_in=YYYY-MM-DD`, `check_out=YYYY-MM-DD`. Masalan: `/api/listings/?kind=car&region=14` yoki `/api/listings/?region=14&district=218`.
 
 API Django session autentifikatsiyasi va CSRF himoyasidan foydalanadi.
+
+## Helper-admin panel va admin chat
+
+- Saytdagi **Admin bilan bog'lanish** tugmasi kirgan foydalanuvchini to'g'ridan-to'g'ri saytdagi chatga ("Rentora Admin") olib boradi. Kirmagan foydalanuvchilar uchun forma qoladi.
+- `/helper/` — adminlar (`is_staff`) uchun panel: admin xabarlari (holat filtri va qidiruv), foydalanuvchi chatlari (faqat ko'rish), barcha bronlar (holat, tur, to'lov, sana bo'yicha filtr, bekor qilish), foydalanuvchilar (ID, UID, telefon, rol bo'yicha qidiruv), e'lonlar (yashirish/ko'rsatish) va forma xabarlari.
+- Foydalanuvchi va adminlarni faqat bosh admin (superuser) qo'shadi, bloklaydi yoki o'chiradi.
+- Admin `SUPPORT_AI_DELAY_SECONDS` (standart 120 s) ichida javob bermasa, `python manage.py run_support_ai` jarayoni foydalanuvchiga "Rentora Admin" nomidan javob beradi. AI faqat ochiq katalogni va **so'rayotgan foydalanuvchining o'z** bronlarini ko'ra oladi — boshqa foydalanuvchi yoki adminlar ma'lumoti unga umuman berilmaydi. Murakkab savollarni "Admin kerak" holatiga o'tkazadi.
+- Paneldagi AI yordamchi foydalanuvchilar, bronlar, chatlar va e'lonlarni faqat o'qiy oladi (qo'shish/o'chirish imkoni yo'q).
+
+## Chat
+
+Telegram uslubidagi chat: o'qilgan/yuborilgan belgilari (✓ / ✓✓), har bir chatda o'qilmagan xabarlar soni, sahifani yangilamasdan yuborish, rasm, video va ovozli xabar (250 MB gacha, `CHAT_ATTACHMENT_MAX_BYTES`). Video seek uchun HTTP Range qo'llab-quvvatlanadi. Mikrofon brauzerda faqat HTTPS orqali ishlaydi.
+
+## Xavfsizlik
+
+Kirish urinishlari cheklangan (8 marta noto'g'ri parol → 15 daqiqa blok), ro'yxatdan o'tish, AI, chat va izohlar uchun rate limit bor. Barcha yuklangan fayllar tasodifiy nom va ruxsat etilgan kengaytma bilan saqlanadi, rasmlar Pillow orqali, video/audio esa fayl boshidagi baytlar orqali tekshiriladi. Sahifalarda Content-Security-Policy, `X-Frame-Options: DENY`, `nosniff` va `Referrer-Policy` sarlavhalari bor; yuklangan fayllar `sandbox` CSP bilan beriladi. HTTPS domen ulanganda (`PUBLIC_SITE_URL=https://...`) secure cookie, HSTS va HTTPS redirect avtomatik yoqiladi. Django admin manzilini `ADMIN_URL` orqali o'zgartirish mumkin.
+
+## Katalogni to'ldirish
+
+```bash
+python manage.py seed_catalog --owner <ijara_beruvchi_login> --count 150 --photos <papka> [--wipe]
+```
+
+`--photos` ichida `home/` va `car/` papkalari bo'lishi kerak. `--wipe` foydalanuvchi ma'lumotlaridan (akkaunt, profil, Telegram, kompaniya) boshqa hamma narsani (e'lonlar, bronlar, chatlar, izohlar) o'chiradi.
 
 ## Docker bilan ishga tushirish
 

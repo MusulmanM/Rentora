@@ -1,42 +1,30 @@
 {% extends 'core/base.html' %}
 {% load static core_tags %}
-{% block title %}{{ conversation.listing.title }} — Chat — Rentora{% endblock %}
-{% block extra_head %}<link rel="stylesheet" href="{% static 'core/chat.css' %}?v=20261013-nav5">{% endblock %}
+{% block title %}{% if conversation.is_support %}Rentora Admin{% else %}{{ conversation.listing.title }}{% endif %} — Chat — Rentora{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'core/chat.css' %}?v=20261014-tg1">{% endblock %}
+{% block ai_widget %}{% endblock %}
 {% block content %}
-<header class="site-header wrap" data-unread-endpoint="{% url 'chat-unread-status' %}"><a class="brand" href="{% url 'home' %}"><span class="brand-symbol"><i></i><i></i><i></i></span><span>Rentora</span></a><nav class="main-nav" id="main-nav"><a href="{% url 'home' %}">Bosh sahifa</a><a href="{% url 'chat-inbox' %}">Chatlar<span class="unread-dot" data-unread-indicator role="img" aria-label="O'qilmagan yangi xabarlar"{% if not has_unread_chat_messages %} hidden{% endif %}></span></a><a href="{% url 'my-bookings' %}">Bronlarim</a></nav><div class="header-actions">{% include 'core/language_switcher.html' %}<a class="nav-bookings" href="{% url 'listing-detail' conversation.listing.slug %}">{% localized_title conversation.listing %}</a><a class="user-pill" href="{% url 'profile' %}">{{ request.user.first_name|default:request.user.username|first|upper }}</a></div><button class="mobile-menu-button" data-menu-toggle aria-controls="main-nav" aria-label="Menyuni ochish" aria-expanded="false">☰</button></header>
+<header class="site-header wrap" data-unread-endpoint="{% url 'chat-unread-status' %}"><a class="brand" href="{% url 'home' %}"><span class="brand-symbol"><i></i><i></i><i></i></span><span>Rentora</span></a><nav class="main-nav" id="main-nav"><a href="{% url 'home' %}">Bosh sahifa</a><a href="{% url 'chat-inbox' %}">Chatlar<span class="unread-dot" data-unread-indicator role="img" aria-label="O'qilmagan yangi xabarlar"{% if not has_unread_chat_messages %} hidden{% endif %}></span></a><a href="{% url 'my-bookings' %}">Bronlarim</a></nav><div class="header-actions">{% include 'core/language_switcher.html' %}<a class="user-pill" href="{% url 'profile' %}">{% user_avatar request.user "user-pill-avatar" %}</a></div><button class="mobile-menu-button" data-menu-toggle aria-controls="main-nav" aria-label="Menyuni ochish" aria-expanded="false">☰</button></header>
 <main class="chat-page wrap">
-  <a class="back-link" href="{% url 'chat-inbox' %}">← Chatlar</a>
-  <section class="chat-room" data-chat-room data-messages-url="{% url 'chat-messages-api' conversation.pk %}">
-    <header class="chat-room-header"><div><p class="section-kicker">E'LON BO'YICHA SUHBAT</p><h1>{% localized_title conversation.listing %}</h1><span data-no-translate="true">{% if conversation.customer_id == request.user.pk %}{{ conversation.provider.get_full_name|default:conversation.provider.username }}{% else %}{{ conversation.customer.get_full_name|default:conversation.customer.username }}{% endif %}</span></div><a href="{% url 'listing-detail' conversation.listing.slug %}">E'lonni ko'rish ↗</a></header>
-    <div class="chat-messages" data-chat-messages data-last-id="{{ latest_chat_message_id }}" aria-live="polite">
-      {% for message in chat_messages %}
-      <article class="chat-message{% if message.sender_id == request.user.pk %} is-mine{% endif %}" data-message-id="{{ message.pk }}" data-no-translate="true">
-        <strong>{{ message.sender.get_full_name|default:message.sender.username }}</strong>
-        {% if message.text %}<p>{{ message.text|linebreaksbr }}</p>{% endif %}
-        {% if message.attachment %}
-          {% if message.attachment_type == 'image' %}<a href="{% url 'chat-media' message.pk %}" target="_blank" rel="noopener"><img src="{% url 'chat-media' message.pk %}" alt="Chat rasmi" loading="lazy"></a>
-          {% else %}<audio controls preload="metadata" src="{% url 'chat-media' message.pk %}">Brauzeringiz audio ijrosini qo'llamaydi.</audio>{% endif %}
-        {% endif %}
-        <time>{{ message.created_at|date:'d.m.Y H:i' }}</time>
-      </article>
-      {% endfor %}
+  <section class="tg-chat" data-chat-room data-messages-url="{% url 'chat-messages-api' conversation.pk %}">
+    <header class="tg-chat-header">
+      <a class="tg-back" href="{% url 'chat-inbox' %}" aria-label="Chatlar">←</a>
+      {% if conversation.is_support %}
+        <span class="tg-avatar tg-avatar-admin" aria-hidden="true">R</span>
+        <div class="tg-chat-title"><h1>Rentora Admin</h1><span>Admin jamoasi · odatda tez javob beradi</span></div>
+      {% else %}
+        {% if conversation.customer_id == request.user.pk %}{% user_avatar conversation.provider "tg-avatar" %}{% else %}{% user_avatar conversation.customer "tg-avatar" %}{% endif %}
+        <div class="tg-chat-title"><h1>{% localized_title conversation.listing %}</h1><span data-no-translate="true">{% if conversation.customer_id == request.user.pk %}{{ conversation.provider.get_full_name|default:conversation.provider.username }}{% else %}{{ conversation.customer.get_full_name|default:conversation.customer.username }}{% endif %}</span></div>
+        <a class="tg-header-link" href="{% url 'listing-detail' conversation.listing.slug %}">E'lonni ko'rish ↗</a>
+      {% endif %}
+    </header>
+    <div class="tg-messages" data-chat-messages data-last-id="{{ latest_chat_message_id }}" aria-live="polite">
+      {% include 'core/partials/chat_messages.html' %}
+      {% if not chat_messages %}<p class="tg-empty" data-chat-empty>{% if conversation.is_support %}Savolingizni yozing — admin yoki Rentora yordamchisi shu yerda javob beradi.{% else %}Xabar yozib suhbatni boshlang.{% endif %}</p>{% endif %}
     </div>
     <p class="chat-sync-status" data-chat-sync-status role="status" aria-live="polite"></p>
-    <form method="post" enctype="multipart/form-data" class="chat-compose" data-chat-form>
-      {% csrf_token %}
-      {% if form.non_field_errors %}<div class="form-error-box">{{ form.non_field_errors }}</div>{% endif %}
-      <label class="visually-hidden" for="{{ form.text.id_for_label }}">Xabar</label>{{ form.text }}
-      {% if form.text.errors %}<small class="field-error">{{ form.text.errors|striptags }}</small>{% endif %}
-      <div class="chat-compose-actions">
-        <label class="chat-file-label" for="{{ form.attachment.id_for_label }}">Rasm / audio tanlash</label>{{ form.attachment }}
-        <button type="button" class="btn btn-outline" data-record-audio>Ovoz yozish</button>
-        <span data-record-status aria-live="polite"></span>
-        <button type="submit" class="btn btn-dark">Yuborish ↑</button>
-      </div>
-      {% if form.attachment.errors %}<small class="field-error">{{ form.attachment.errors|striptags }}</small>{% endif %}
-      <p>Matn, rasm yoki 15 MB gacha audio yuborish mumkin.</p>
-    </form>
+    {% include 'core/partials/chat_compose.html' %}
   </section>
 </main>
 {% endblock %}
-{% block scripts %}<script src="{% static 'core/chat.js' %}?v=20261013-nav5" defer></script>{% endblock %}
+{% block scripts %}<script src="{% static 'core/chat.js' %}?v=20261014-tg1" defer></script>{% endblock %}

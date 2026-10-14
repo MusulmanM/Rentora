@@ -1,0 +1,19 @@
+{% extends 'core/helper/base.html' %}
+{% load core_tags %}
+{% block helper_title %}Foydalanuvchi chatlari{% endblock %}
+{% block helper_content %}
+<div class="helper-head"><div><p class="section-kicker">MIJOZ ↔ IJARA BERUVCHI</p><h1>Foydalanuvchi chatlari</h1></div></div>
+<form method="get" class="helper-filters" role="search">
+  <input type="search" name="q" value="{{ query }}" placeholder="E'lon nomi yoki foydalanuvchi" aria-label="Qidirish">
+  <button class="btn btn-dark btn-small" type="submit">Qidirish</button>
+</form>
+<section class="helper-card helper-list">
+  {% for conversation in page %}
+  <a class="helper-row" href="{% url 'helper-chat-view' conversation.pk %}">
+    {% user_avatar conversation.customer "tg-avatar" %}
+    <span class="helper-row-main"><b data-no-translate="true">{{ conversation.customer.username }} ↔ {{ conversation.provider.username }}</b><small>{% localized_title conversation.listing %} · {{ conversation.message_total }} ta xabar · {{ conversation.updated_at|date:'d.m.Y H:i' }}</small></span>
+  </a>
+  {% empty %}<p class="helper-muted">Chatlar topilmadi.</p>{% endfor %}
+</section>
+{% include 'core/partials/pagination.html' %}
+{% endblock %}

@@ -1,0 +1,49 @@
+{% extends 'core/helper/base.html' %}
+{% load core_tags %}
+{% block helper_title %}Bosh panel{% endblock %}
+{% block helper_content %}
+<div class="helper-head"><div><p class="section-kicker">HELPER-ADMIN</p><h1>Bosh panel</h1></div></div>
+<section class="helper-stats">
+  <a class="helper-stat is-alert" href="{% url 'helper-support' %}"><b>{{ stats.support_waiting }}</b><span>Javob kutayotgan xabarlar</span></a>
+  <a class="helper-stat" href="{% url 'helper-bookings' %}?status=pending"><b>{{ stats.bookings_pending }}</b><span>Tasdiq kutayotgan bronlar</span></a>
+  <a class="helper-stat" href="{% url 'helper-bookings' %}"><b>{{ stats.bookings_active }}</b><span>Faol bronlar</span></a>
+  <a class="helper-stat" href="{% url 'helper-bookings' %}"><b>{{ stats.bookings_today }}</b><span>Bugungi bronlar</span></a>
+  <a class="helper-stat" href="{% url 'helper-users' %}"><b>{{ stats.users }}</b><span>Foydalanuvchilar</span></a>
+  <a class="helper-stat" href="{% url 'helper-users' %}?role=provider"><b>{{ stats.providers }}</b><span>Ijara beruvchilar</span></a>
+  <a class="helper-stat" href="{% url 'helper-products' %}?kind=home"><b>{{ stats.homes }}</b><span>Uylar</span></a>
+  <a class="helper-stat" href="{% url 'helper-products' %}?kind=car"><b>{{ stats.cars }}</b><span>Avtomobillar</span></a>
+</section>
+
+<div class="helper-grid">
+  <section class="helper-card helper-ai" data-helper-ai data-url="{% url 'helper-ai' %}">
+    <h2><span aria-hidden="true">✦</span> AI yordamchi</h2>
+    <p class="helper-muted">Foydalanuvchilar, bronlar, chatlar va e'lonlar bo'yicha savol bering. AI faqat ma'lumotni o'qiydi — foydalanuvchi yoki admin qo'sha/o'chira olmaydi.</p>
+    <div class="helper-ai-log" data-ai-log aria-live="polite"></div>
+    <form class="helper-ai-form" data-ai-form>
+      {% csrf_token %}
+      <input type="text" name="message" maxlength="1000" placeholder="Masalan: bugun nechta bron bo'ldi?" required aria-label="AI yordamchiga savol">
+      <button class="btn btn-dark btn-small" type="submit">So'rash</button>
+    </form>
+  </section>
+
+  <section class="helper-card">
+    <div class="helper-card-head"><h2>Javob kutayotgan xabarlar</h2><a href="{% url 'helper-support' %}">Barchasi →</a></div>
+    {% for thread in waiting_threads %}
+    <a class="helper-row" href="{% url 'helper-support-thread' thread.pk %}">
+      {% user_avatar thread.customer "tg-avatar" %}
+      <span class="helper-row-main"><b data-no-translate="true">{{ thread.customer.get_full_name|default:thread.customer.username }}</b><small>{{ thread.get_support_status_display }} · {{ thread.updated_at|date:'d.m H:i' }}</small></span>
+      {% if thread.unread_count %}<span class="tg-badge">{{ thread.unread_count }}</span>{% endif %}
+    </a>
+    {% empty %}<p class="helper-muted">Hozircha javob kutayotgan xabar yo'q.</p>{% endfor %}
+  </section>
+
+  <section class="helper-card helper-card-wide">
+    <div class="helper-card-head"><h2>So'nggi bronlar</h2><a href="{% url 'helper-bookings' %}">Barchasi →</a></div>
+    <div class="helper-table-wrap"><table class="helper-table">
+      <thead><tr><th>#</th><th>E'lon</th><th>Mijoz</th><th>Sana</th><th>Holat</th><th>Jami</th></tr></thead>
+      <tbody>{% for booking in recent_bookings %}<tr><td>{{ booking.pk }}</td><td data-no-translate="true">{{ booking.listing.title }}</td><td data-no-translate="true"><a href="{% url 'helper-user-detail' booking.user_id %}">{{ booking.user.username }}</a></td><td>{{ booking.check_in|date:'d.m' }} — {{ booking.check_out|date:'d.m.Y' }}</td><td><span class="booking-status status-{{ booking.status }}">{{ booking.get_status_display }}</span></td><td>{{ booking.total_price|money }} so'm</td></tr>
+      {% empty %}<tr><td colspan="6" class="helper-muted">Bronlar yo'q.</td></tr>{% endfor %}</tbody>
+    </table></div>
+  </section>
+</div>
+{% endblock %}

@@ -1,0 +1,18 @@
+{% extends 'core/helper/base.html' %}
+{% block helper_title %}Foydalanuvchi qo'shish{% endblock %}
+{% block helper_content %}
+<a class="back-link" href="{% url 'helper-users' %}">← Foydalanuvchilar</a>
+<section class="helper-card helper-form-card">
+  <h1>Foydalanuvchi yoki admin qo'shish</h1>
+  <p class="helper-muted">"Admin" belgilansa, bu hisob helper-admin paneliga kira oladi. Foydalanuvchi va adminlarni faqat bosh admin qo'shadi yoki o'chiradi.</p>
+  <form method="post" class="auth-form">
+    {% csrf_token %}
+    {% if form.non_field_errors %}<div class="form-error-box">{{ form.non_field_errors }}</div>{% endif %}
+    {% for field in form %}
+    {% if field.name == 'is_staff' %}<label class="checkbox-row">{{ field }} {{ field.label }}</label>
+    {% else %}<div class="form-field"><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% if field.errors %}<small class="field-error">{{ field.errors|striptags }}</small>{% endif %}</div>{% endif %}
+    {% endfor %}
+    <button class="btn btn-dark" type="submit">Yaratish</button>
+  </form>
+</section>
+{% endblock %}

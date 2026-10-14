@@ -4,7 +4,9 @@
   const header = document.querySelector("[data-unread-endpoint]");
   if (!header) return;
   const indicators = document.querySelectorAll("[data-unread-indicator]");
-  if (!indicators.length) return;
+  const inbox = document.querySelector("[data-inbox]");
+  if (!indicators.length && !inbox) return;
+  let lastCount = Number(inbox?.dataset.unreadTotal || 0);
 
   async function refreshUnreadState() {
     try {
@@ -13,14 +15,17 @@
         credentials: "same-origin",
       });
       if (!response.ok) return;
-      const { has_unread: hasUnread } = await response.json();
+      const { has_unread: hasUnread, count = 0 } = await response.json();
       indicators.forEach((indicator) => {
         indicator.hidden = !hasUnread;
       });
+      // On the chat list, refresh the per-chat red badges when a new message arrives.
+      if (inbox && count > lastCount) window.location.reload();
+      lastCount = count;
     } catch {
       // Retain the last server-rendered state until the next successful poll.
     }
   }
 
-  window.setInterval(refreshUnreadState, 8000);
+  window.setInterval(refreshUnreadState, inbox ? 5000 : 8000);
 })();

@@ -1,0 +1,26 @@
+{% extends 'core/helper/base.html' %}
+{% load core_tags %}
+{% block helper_title %}Admin xabarlari{% endblock %}
+{% block helper_content %}
+<div class="helper-head"><div><p class="section-kicker">FOYDALANUVCHILAR ADMINGA YOZGAN</p><h1>Admin xabarlari</h1></div></div>
+<form method="get" class="helper-filters" role="search">
+  <input type="search" name="q" value="{{ query }}" placeholder="Foydalanuvchi, telefon yoki xabar matni" aria-label="Qidirish">
+  <select name="status" aria-label="Holat">
+    <option value="open"{% if status == 'open' %} selected{% endif %}>Javob kerak</option>
+    {% for value, label in status_choices %}<option value="{{ value }}"{% if status == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+    <option value="all"{% if status == 'all' %} selected{% endif %}>Barchasi</option>
+  </select>
+  <button class="btn btn-dark btn-small" type="submit">Qidirish</button>
+</form>
+<p class="helper-muted helper-note">Admin {{ ai_delay_minutes }} daqiqa ichida javob bermasa, Rentora AI foydalanuvchiga admin nomidan javob beradi. Murakkab savollarni AI "Admin kerak" holatiga o'tkazadi.</p>
+<section class="helper-card helper-list">
+  {% for thread in page %}
+  <a class="helper-row" href="{% url 'helper-support-thread' thread.pk %}">
+    {% user_avatar thread.customer "tg-avatar" %}
+    <span class="helper-row-main"><b data-no-translate="true">{{ thread.customer.get_full_name|default:thread.customer.username }}</b><small><span class="support-status support-{{ thread.support_status }}">{{ thread.get_support_status_display|default:"—" }}</span> · {{ thread.message_total }} ta xabar · {{ thread.updated_at|date:'d.m.Y H:i' }}</small></span>
+    {% if thread.unread_count %}<span class="tg-badge" aria-label="O'qilmagan xabarlar: {{ thread.unread_count }}">{{ thread.unread_count }}</span>{% endif %}
+  </a>
+  {% empty %}<p class="helper-muted">Bu filtr bo'yicha xabar topilmadi.</p>{% endfor %}
+</section>
+{% include 'core/partials/pagination.html' %}
+{% endblock %}

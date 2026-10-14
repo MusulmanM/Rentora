@@ -1,0 +1,46 @@
+{% extends 'core/helper/base.html' %}
+{% load core_tags %}
+{% block helper_title %}Bronlar{% endblock %}
+{% block helper_content %}
+<div class="helper-head"><div><p class="section-kicker">BARCHA BRON JARAYONLARI</p><h1>Bronlar</h1></div></div>
+<form method="get" class="helper-filters" role="search">
+  <input type="search" name="q" value="{{ filters.q }}" placeholder="#ID, e'lon, mijoz yoki ijara beruvchi" aria-label="Qidirish">
+  <select name="status" aria-label="Holat"><option value="">Barcha holatlar</option>{% for value, label in status_choices %}<option value="{{ value }}"{% if filters.status == value %} selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+  <select name="kind" aria-label="E'lon turi"><option value="">Barcha turlar</option>{% for value, label in kind_choices %}<option value="{{ value }}"{% if filters.kind == value %} selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+  <select name="payment" aria-label="To'lov turi"><option value="">Barcha to'lovlar</option>{% for value, label in payment_choices %}<option value="{{ value }}"{% if filters.payment == value %} selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+  <label class="helper-date">Dan <input type="date" name="date_from" value="{{ filters.date_from }}"></label>
+  <label class="helper-date">Gacha <input type="date" name="date_to" value="{{ filters.date_to }}"></label>
+  <button class="btn btn-dark btn-small" type="submit">Qidirish</button>
+  <a class="filter-reset" href="{% url 'helper-bookings' %}">Tozalash</a>
+</form>
+<section class="helper-card">
+  <div class="helper-table-wrap"><table class="helper-table">
+    <thead><tr><th>#</th><th>E'lon</th><th>Mijoz</th><th>Ijara beruvchi</th><th>Sana</th><th>To'lov</th><th>Jami</th><th>Holat</th><th></th></tr></thead>
+    <tbody>
+    {% for booking in page %}
+    <tr>
+      <td>{{ booking.pk }}</td>
+      <td><a href="{% url 'listing-detail' booking.listing.slug %}" target="_blank" rel="noopener" data-no-translate="true">{{ booking.listing.title|truncatechars:40 }}</a><small class="helper-muted">{{ booking.listing.get_kind_display }}</small></td>
+      <td data-no-translate="true"><a href="{% url 'helper-user-detail' booking.user_id %}">{{ booking.user.username }}</a></td>
+      <td data-no-translate="true">{% if booking.listing.owner_id %}<a href="{% url 'helper-user-detail' booking.listing.owner_id %}">{{ booking.listing.owner.username }}</a>{% else %}—{% endif %}</td>
+      <td>{{ booking.check_in|date:'d.m.Y' }} — {{ booking.check_out|date:'d.m.Y' }}<small class="helper-muted">{{ booking.days }} kun · so'rov {{ booking.requested_at|date:'d.m H:i' }}</small></td>
+      <td>{{ booking.get_payment_method_display }}</td>
+      <td>{{ booking.total_price|money }} so'm</td>
+      <td><span class="booking-status status-{{ booking.status }}">{{ booking.get_status_display }}</span></td>
+      <td>{% if booking.status == 'pending' or booking.status == 'confirmed' %}<form method="post" action="{% url 'helper-booking-cancel' booking.pk %}" data-confirm="Bronni bekor qilasizmi? Ikkala tomonga Telegram xabari boradi.">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}"><button class="btn btn-danger-outline btn-small" type="submit">Bekor qilish</button></form>{% endif %}</td>
+    </tr>
+    {% empty %}<tr><td colspan="9" class="helper-muted">Bronlar topilmadi.</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+</section>
+{% include 'core/partials/pagination.html' %}
+{% if orders %}
+<section class="helper-card">
+  <h2>To'lov kutayotgan onlayn buyurtmalar</h2>
+  <div class="helper-table-wrap"><table class="helper-table">
+    <thead><tr><th>E'lon</th><th>Mijoz</th><th>Sana</th><th>To'lov</th><th>Jami</th><th>Holat</th></tr></thead>
+    <tbody>{% for order in orders %}<tr><td data-no-translate="true">{{ order.listing.title|truncatechars:40 }}</td><td data-no-translate="true">{{ order.user.username }}</td><td>{{ order.check_in|date:'d.m.Y' }} — {{ order.check_out|date:'d.m.Y' }}</td><td>{{ order.get_payment_method_display }}</td><td>{{ order.total_price|money }} so'm</td><td>{{ order.get_status_display }}</td></tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+{% endif %}
+{% endblock %}

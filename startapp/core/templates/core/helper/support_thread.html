@@ -1,0 +1,34 @@
+{% extends 'core/helper/base.html' %}
+{% load static core_tags %}
+{% block helper_title %}Admin xabarlari{% endblock %}
+{% block helper_content %}
+<a class="back-link" href="{% url 'helper-support' %}">← Admin xabarlari</a>
+<div class="helper-thread">
+  <section class="tg-chat helper-chat" data-chat-room data-show-senders data-messages-url="{% url 'chat-messages-api' conversation.pk %}">
+    <header class="tg-chat-header">
+      {% user_avatar customer "tg-avatar" %}
+      <div class="tg-chat-title"><h1 data-no-translate="true">{{ customer.get_full_name|default:customer.username }}</h1><span><span class="support-status support-{{ conversation.support_status }}">{{ conversation.get_support_status_display|default:"—" }}</span> · Javobingiz foydalanuvchiga "Rentora Admin" nomidan ko'rinadi</span></div>
+    </header>
+    <div class="tg-messages" data-chat-messages data-last-id="{{ latest_chat_message_id }}" aria-live="polite">
+      {% include 'core/partials/chat_messages.html' with show_senders=True %}
+    </div>
+    <p class="chat-sync-status" data-chat-sync-status role="status" aria-live="polite"></p>
+    {% include 'core/partials/chat_compose.html' with form=reply_form %}
+  </section>
+  <aside class="helper-card helper-user-card">
+    <h2>Foydalanuvchi</h2>
+    <dl class="helper-facts">
+      <div><dt>ID</dt><dd>{{ customer.pk }}</dd></div>
+      <div><dt>UID</dt><dd class="helper-mono" data-no-translate="true">{{ customer.account.uid }}</dd></div>
+      <div><dt>Foydalanuvchi nomi</dt><dd data-no-translate="true">{{ customer.username }}</dd></div>
+      <div><dt>Telefon</dt><dd data-no-translate="true">{{ customer.profile.phone_number|default:"—" }}</dd></div>
+      <div><dt>Elektron pochta</dt><dd data-no-translate="true">{{ customer.email|default:"—" }}</dd></div>
+    </dl>
+    <a class="btn btn-outline btn-small" href="{% url 'helper-user-detail' customer.pk %}">To'liq ma'lumot →</a>
+    <h3>So'nggi bronlari</h3>
+    {% for booking in customer_bookings %}<p class="helper-mini-row"><span data-no-translate="true">#{{ booking.pk }} {{ booking.listing.title }}</span><span class="booking-status status-{{ booking.status }}">{{ booking.get_status_display }}</span></p>
+    {% empty %}<p class="helper-muted">Bronlari yo'q.</p>{% endfor %}
+  </aside>
+</div>
+{% endblock %}
+{% block helper_scripts %}<script src="{% static 'core/chat.js' %}?v=20261014-tg1" defer></script>{% endblock %}

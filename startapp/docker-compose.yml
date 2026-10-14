@@ -1,34 +1,60 @@
-# Rentora: web app + Telegram bot (long polling), sharing one SQLite/media volume.
+# Rentora: web app + Telegram bot + support AI, sharing one SQLite/media volume.
 #
 #   cp .env.example .env      # fill in secrets and the public address
 #   docker compose up -d --build
 #
 # The site listens on RENTORA_PORT (default 8090).
+# With a domain pointed at the server, add HTTPS (free Let's Encrypt certificate via Caddy):
+#   DOMAIN=rentora.uz docker compose --profile https up -d
 name: rentora
+
+x-app: &app
+  image: rentora:latest
+  env_file: .env
+  volumes:
+    - rentora-data:/data
+  restart: unless-stopped
 
 services:
   web:
+    <<: *app
     build: .
-    image: rentora:latest
-    env_file: .env
     ports:
       - "${RENTORA_PORT:-8090}:8000"
-    volumes:
-      - rentora-data:/data
-    restart: unless-stopped
 
   bot:
-    image: rentora:latest
-    env_file: .env
+    <<: *app
     environment:
       RUN_MIGRATIONS: "0"
     command: ["python", "manage.py", "run_telegram_bot"]
-    volumes:
-      - rentora-data:/data
     depends_on:
       web:
         condition: service_healthy
+
+  support-ai:
+    <<: *app
+    environment:
+      RUN_MIGRATIONS: "0"
+    command: ["python", "manage.py", "run_support_ai"]
+    depends_on:
+      web:
+        condition: service_healthy
+
+  caddy:
+    image: caddy:2.8
+    profiles: ["https"]
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    depends_on:
+      - web
     restart: unless-stopped
 
 volumes:
   rentora-data:
+  caddy-data:

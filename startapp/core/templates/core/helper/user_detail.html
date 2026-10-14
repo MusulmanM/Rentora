@@ -1,0 +1,43 @@
+{% extends 'core/helper/base.html' %}
+{% load core_tags %}
+{% block helper_title %}Foydalanuvchilar{% endblock %}
+{% block helper_content %}
+<a class="back-link" href="{% url 'helper-users' %}">← Foydalanuvchilar</a>
+<section class="helper-card helper-profile">
+  {% user_avatar member "profile-avatar" %}
+  <div class="helper-profile-main">
+    <h1 data-no-translate="true">{{ member.get_full_name|default:member.username }}</h1>
+    <p>{% if member.is_superuser %}<span class="role-badge role-super">Bosh admin</span>{% elif member.is_staff %}<span class="role-badge role-staff">Admin</span>{% endif %}{% if member.host_profile %}<span class="role-badge">Ijara beruvchi</span>{% endif %}{% if not member.is_active %}<span class="role-badge role-blocked">Bloklangan</span>{% endif %}</p>
+    <dl class="helper-facts helper-facts-grid">
+      <div><dt>ID</dt><dd>{{ member.pk }}</dd></div>
+      <div><dt>UID</dt><dd class="helper-mono" data-no-translate="true">{{ member.account.uid }}</dd></div>
+      <div><dt>Foydalanuvchi nomi</dt><dd data-no-translate="true">{{ member.username }}</dd></div>
+      <div><dt>Elektron pochta</dt><dd data-no-translate="true">{{ member.email|default:"—" }}</dd></div>
+      <div><dt>Telefon</dt><dd data-no-translate="true">{{ member.profile.phone_number|default:"—" }}</dd></div>
+      <div><dt>Ro'yxatdan o'tgan</dt><dd>{{ member.date_joined|date:'d.m.Y H:i' }}</dd></div>
+      <div><dt>Oxirgi kirish</dt><dd>{{ member.last_login|date:'d.m.Y H:i'|default:"—" }}</dd></div>
+      {% if member.host_profile %}<div><dt>Kompaniya</dt><dd data-no-translate="true">{{ member.host_profile.display_name }} · {{ member.host_profile.phone_number|default:"—" }}</dd></div>{% endif %}
+    </dl>
+    <div class="helper-actions">
+      {% if support_conversation %}<a class="btn btn-outline btn-small" href="{% url 'helper-support-thread' support_conversation.pk %}">✉ Admin chatini ochish</a>{% endif %}
+      {% if request.user.is_superuser and not member.is_superuser and member.pk != request.user.pk %}
+      <form method="post" action="{% url 'helper-user-action' member.pk 'toggle-staff' %}" data-confirm="Admin huquqini o'zgartirasizmi?">{% csrf_token %}<button class="btn btn-outline btn-small" type="submit">{% if member.is_staff %}Adminlikdan olish{% else %}Admin qilish{% endif %}</button></form>
+      <form method="post" action="{% url 'helper-user-action' member.pk 'toggle-active' %}" data-confirm="Hisob holatini o'zgartirasizmi?">{% csrf_token %}<button class="btn btn-outline btn-small" type="submit">{% if member.is_active %}Bloklash{% else %}Blokdan chiqarish{% endif %}</button></form>
+      <form method="post" action="{% url 'helper-user-action' member.pk 'delete' %}" data-confirm="Foydalanuvchini butunlay o'chirasizmi? Bu amalni qaytarib bo'lmaydi.">{% csrf_token %}<button class="btn btn-danger-outline btn-small" type="submit">O'chirish</button></form>
+      {% endif %}
+    </div>
+  </div>
+</section>
+<div class="helper-grid">
+  <section class="helper-card">
+    <h2>Bronlari</h2>
+    {% for booking in member_bookings %}<p class="helper-mini-row"><span data-no-translate="true">#{{ booking.pk }} {{ booking.listing.title }}</span><span>{{ booking.check_in|date:'d.m.Y' }}</span><span class="booking-status status-{{ booking.status }}">{{ booking.get_status_display }}</span></p>
+    {% empty %}<p class="helper-muted">Bronlari yo'q.</p>{% endfor %}
+  </section>
+  <section class="helper-card">
+    <h2>E'lonlari</h2>
+    {% for listing in member_listings %}<p class="helper-mini-row"><a href="{% url 'listing-detail' listing.slug %}" target="_blank" rel="noopener" data-no-translate="true">{{ listing.title }}</a><span>{{ listing.price_per_day|money }} so'm</span></p>
+    {% empty %}<p class="helper-muted">E'lonlari yo'q.</p>{% endfor %}
+  </section>
+</div>
+{% endblock %}

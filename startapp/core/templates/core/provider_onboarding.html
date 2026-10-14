@@ -1,20 +1,21 @@
 {% extends 'core/base.html' %}
-{% block title %}Ijara beruvchi bo'lish — Rentora{% endblock %}
+{% block title %}{% if is_edit %}Kompaniya ma'lumotlari{% else %}Ijara beruvchi bo'lish{% endif %} — Rentora{% endblock %}
 {% block body_class %}auth-body{% endblock %}
 {% block content %}
 <div class="auth-shell">
+  <div class="auth-language">{% include 'core/language_switcher.html' %}</div>
   <a class="brand auth-brand" href="{% url 'profile' %}"><span class="brand-symbol"><i></i><i></i><i></i></span><span>Rentora</span></a>
   <div class="auth-card">
-    <a class="auth-back-link" href="{% url 'profile' %}">← Profil</a>
-    <div class="auth-symbol">⌂</div>
+    <a class="auth-back-link" href="{% if is_edit %}{% url 'provider-dashboard' %}{% else %}{% url 'profile' %}{% endif %}">← {% if is_edit %}Ijara beruvchi paneli{% else %}Profil{% endif %}</a>
+    {% if is_edit and form.instance.logo %}<img class="company-logo-large" src="{{ form.instance.logo.url }}" alt="">{% else %}<div class="auth-symbol">⌂</div>{% endif %}
     <p class="section-kicker">IJARA BERUVCHI</p>
-    <h1>Yangi profil yarating.</h1>
-    <p class="auth-subtitle">Qayta foydalanuvchi hisobi yaratish shart emas — tasdiqlangan telefoningiz shu hisobga bog'lanadi.</p>
-    <form method="post" class="auth-form">
+    <h1>{% if is_edit %}Kompaniya ma'lumotlari.{% else %}Yangi profil yarating.{% endif %}</h1>
+    <p class="auth-subtitle">{% if is_edit %}Bu ma'lumotlar har bir e'loningiz sahifasida ko'rsatiladi.{% else %}Kompaniya nomi, logotipi va telefon raqami majburiy — ular e'lonlaringiz sahifasida mijozlarga ko'rinadi.{% endif %}</p>
+    <form method="post" enctype="multipart/form-data" class="auth-form">
       {% csrf_token %}
       {% if form.non_field_errors %}<div class="form-error-box">{{ form.non_field_errors }}</div>{% endif %}
-      {% for field in form %}<div class="form-field"><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% if field.errors %}<small class="field-error">{{ field.errors|striptags }}</small>{% endif %}</div>{% endfor %}
-      <button class="btn btn-dark auth-submit" type="submit">Ijara beruvchi bo'lish <span>→</span></button>
+      {% for field in form %}<div class="form-field"><label for="{{ field.id_for_label }}">{{ field.label }} <span class="required-mark" aria-hidden="true">*</span></label>{{ field }}{% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}{% if field.errors %}<small class="field-error">{{ field.errors|striptags }}</small>{% endif %}</div>{% endfor %}
+      <button class="btn btn-dark auth-submit" type="submit">{% if is_edit %}O'zgarishlarni saqlash{% else %}Ijara beruvchi bo'lish{% endif %} <span>→</span></button>
     </form>
   </div>
 </div>

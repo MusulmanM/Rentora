@@ -1,16 +1,28 @@
 {% extends 'core/base.html' %}
 {% load static core_tags %}
 {% block title %}Chatlar — Rentora{% endblock %}
-{% block extra_head %}<link rel="stylesheet" href="{% static 'core/chat.css' %}?v=20261013-nav5">{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'core/chat.css' %}?v=20261014-tg1">{% endblock %}
+{% block ai_widget %}{% endblock %}
 {% block content %}
-<header class="site-header wrap" data-unread-endpoint="{% url 'chat-unread-status' %}"><a class="brand" href="{% url 'home' %}"><span class="brand-symbol"><i></i><i></i><i></i></span><span>Rentora</span></a><nav class="main-nav" id="main-nav"><a href="{% url 'home' %}">Bosh sahifa</a><a class="nav-active" href="{% url 'chat-inbox' %}">Chatlar<span class="unread-dot" data-unread-indicator role="img" aria-label="O'qilmagan yangi xabarlar"{% if not has_unread_chat_messages %} hidden{% endif %}></span></a><a href="{% url 'my-bookings' %}">Bronlarim</a></nav><div class="header-actions">{% include 'core/language_switcher.html' %}<a class="user-pill" href="{% url 'profile' %}">{{ request.user.first_name|default:request.user.username|first|upper }}</a></div><button class="mobile-menu-button" data-menu-toggle aria-controls="main-nav" aria-label="Menyuni ochish" aria-expanded="false">☰</button></header>
+<header class="site-header wrap" data-unread-endpoint="{% url 'chat-unread-status' %}"><a class="brand" href="{% url 'home' %}"><span class="brand-symbol"><i></i><i></i><i></i></span><span>Rentora</span></a><nav class="main-nav" id="main-nav"><a href="{% url 'home' %}">Bosh sahifa</a><a class="nav-active" href="{% url 'chat-inbox' %}">Chatlar<span class="unread-dot" data-unread-indicator role="img" aria-label="O'qilmagan yangi xabarlar"{% if not has_unread_chat_messages %} hidden{% endif %}></span></a><a href="{% url 'my-bookings' %}">Bronlarim</a></nav><div class="header-actions">{% include 'core/language_switcher.html' %}<a class="user-pill" href="{% url 'profile' %}">{% user_avatar request.user "user-pill-avatar" %}</a></div><button class="mobile-menu-button" data-menu-toggle aria-controls="main-nav" aria-label="Menyuni ochish" aria-expanded="false">☰</button></header>
 <main class="chat-page wrap">
-  <p class="section-kicker">ALOQA</p><h1>Chatlar</h1>
-  <div class="chat-inbox">
+  <div class="chat-inbox-heading"><div><p class="section-kicker">ALOQA</p><h1>Chatlar</h1></div><a class="btn btn-outline btn-small" href="{% url 'contact-admin' %}">Admin bilan bog'lanish</a></div>
+  <div class="tg-inbox" data-inbox data-unread-total="{{ unread_total }}">
     {% for conversation in conversations %}
-    <a class="chat-inbox-item" href="{% url 'chat-room' conversation.pk %}">
-      <div><strong>{% localized_title conversation.listing %}</strong><span data-no-translate="true">{% if conversation.customer_id == request.user.pk %}{{ conversation.provider.get_full_name|default:conversation.provider.username }}{% else %}{{ conversation.customer.get_full_name|default:conversation.customer.username }}{% endif %}</span></div>
-      <span class="chat-inbox-time">{{ conversation.updated_at|date:'d.m.Y H:i' }}</span>
+    <a class="tg-inbox-item{% if conversation.unread_count %} has-unread{% endif %}" href="{% url 'chat-room' conversation.pk %}">
+      {% if conversation.is_support %}<span class="tg-avatar tg-avatar-admin" aria-hidden="true">R</span>
+      {% elif conversation.customer_id == request.user.pk %}{% user_avatar conversation.provider "tg-avatar" %}
+      {% else %}{% user_avatar conversation.customer "tg-avatar" %}{% endif %}
+      <div class="tg-inbox-text">
+        <div class="tg-inbox-top">
+          <strong>{% if conversation.is_support %}Rentora Admin{% else %}<span data-no-translate="true">{% if conversation.customer_id == request.user.pk %}{{ conversation.provider.get_full_name|default:conversation.provider.username }}{% else %}{{ conversation.customer.get_full_name|default:conversation.customer.username }}{% endif %}</span>{% endif %}</strong>
+          <time>{{ conversation.last_at|default:conversation.updated_at|date:'d.m H:i' }}</time>
+        </div>
+        <div class="tg-inbox-bottom">
+          <span class="tg-inbox-preview">{% if not conversation.is_support %}<em>{% localized_title conversation.listing %}</em> · {% endif %}<span data-no-translate="true">{% if conversation.last_text %}{{ conversation.last_text|truncatechars:60 }}{% elif conversation.last_attachment_type == 'image' %}📷{% elif conversation.last_attachment_type == 'video' %}🎬{% elif conversation.last_attachment_type == 'audio' %}🎤{% endif %}</span></span>
+          {% if conversation.unread_count %}<span class="tg-badge" aria-label="O'qilmagan xabarlar: {{ conversation.unread_count }}">{{ conversation.unread_count }}</span>{% endif %}
+        </div>
+      </div>
     </a>
     {% empty %}
     <div class="chat-empty"><h2>Hozircha chat yo'q</h2><p>E'lon sahifasidan ijaraga beruvchi bilan suhbatni boshlang.</p><a class="btn btn-dark" href="{% url 'home' %}">E'lonlarni ko'rish</a></div>
@@ -18,3 +30,4 @@
   </div>
 </main>
 {% endblock %}
+

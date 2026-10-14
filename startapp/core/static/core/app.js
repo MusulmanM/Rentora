@@ -98,4 +98,15 @@
     searchIn.addEventListener('change', updateSearchDates);
     updateSearchDates();
   }
+
+  // Flash messages fade out after 5 seconds; a click closes one right away.
+  const dismissToast = (toast) => {
+    if (toast.classList.contains('toast-leaving')) return;
+    toast.classList.add('toast-leaving');
+    window.setTimeout(() => toast.remove(), 300);
+  };
+  document.querySelectorAll('.toast-stack .toast').forEach((toast) => {
+    window.setTimeout(() => dismissToast(toast), 5000);
+    toast.addEventListener('click', () => dismissToast(toast));
+  });
 })();

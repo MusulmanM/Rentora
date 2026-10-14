@@ -1,0 +1,34 @@
+{% extends 'core/helper/base.html' %}
+{% load core_tags %}
+{% block helper_title %}E'lonlar{% endblock %}
+{% block helper_content %}
+<div class="helper-head"><div><p class="section-kicker">MAHSULOTLAR</p><h1>E'lonlar</h1></div></div>
+<form method="get" class="helper-filters" role="search">
+  <input type="search" name="q" value="{{ filters.q }}" placeholder="ID, nom, marka, shahar yoki kompaniya" aria-label="Qidirish">
+  <select name="kind" aria-label="E'lon turi"><option value="">Barcha turlar</option>{% for value, label in kind_choices %}<option value="{{ value }}"{% if filters.kind == value %} selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+  <select name="status" aria-label="Ijara holati"><option value="">Barcha holatlar</option><option value="active"{% if filters.status == 'active' %} selected{% endif %}>Faol</option><option value="repair"{% if filters.status == 'repair' %} selected{% endif %}>Remont</option></select>
+  <select name="visibility" aria-label="Ko'rinish"><option value="">Ko'rinadigan va yashirin</option><option value="visible"{% if filters.visibility == 'visible' %} selected{% endif %}>Ko'rinadigan</option><option value="hidden"{% if filters.visibility == 'hidden' %} selected{% endif %}>Yashirilgan</option></select>
+  <button class="btn btn-dark btn-small" type="submit">Qidirish</button>
+  <a class="filter-reset" href="{% url 'helper-products' %}">Tozalash</a>
+</form>
+<section class="helper-card">
+  <div class="helper-table-wrap"><table class="helper-table">
+    <thead><tr><th>#</th><th>E'lon</th><th>Ijara beruvchi</th><th>Hudud</th><th>Narx</th><th>Bronlar</th><th>Holat</th><th></th></tr></thead>
+    <tbody>
+    {% for listing in page %}
+    <tr>
+      <td>{{ listing.pk }}</td>
+      <td><a class="helper-user-cell" href="{% url 'listing-detail' listing.slug %}" target="_blank" rel="noopener">{% if listing.primary_image_url %}<img class="helper-thumb" src="{{ listing.primary_image_url }}" alt="" loading="lazy">{% endif %}<span><b data-no-translate="true">{{ listing.title|truncatechars:42 }}</b><small class="helper-muted">{{ listing.get_kind_display }}{% if listing.brand %} · <span data-no-translate="true">{{ listing.brand }}</span>{% endif %}</small></span></a></td>
+      <td data-no-translate="true">{% if listing.owner_id %}<a href="{% url 'helper-user-detail' listing.owner_id %}">{{ listing.owner.username }}</a>{% else %}—{% endif %}</td>
+      <td>{% listing_location listing %}</td>
+      <td>{{ listing.price_per_day|money }} so'm</td>
+      <td>{{ listing.booking_total }}</td>
+      <td>{% if not listing.is_active %}<span class="role-badge role-blocked">Yashirilgan</span>{% elif listing.availability_status == 'repair' %}<span class="role-badge">Remont</span>{% else %}<span class="role-badge role-ok">Faol</span>{% endif %}</td>
+      <td><form method="post" action="{% url 'helper-product-toggle' listing.pk %}">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}"><button class="btn btn-outline btn-small" type="submit">{% if listing.is_active %}Yashirish{% else %}Ko'rsatish{% endif %}</button></form></td>
+    </tr>
+    {% empty %}<tr><td colspan="8" class="helper-muted">E'lonlar topilmadi.</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+</section>
+{% include 'core/partials/pagination.html' %}
+{% endblock %}

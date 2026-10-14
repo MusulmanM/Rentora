@@ -44,3 +44,4 @@
   .main-nav a,.nav-login,.nav-bookings{min-height:36px;padding:7px 8px;font-size:10px;white-space:nowrap}
   .header-actions .btn{min-height:36px;padding:8px 9px;font-size:10px}
 }
+.toast{cursor:pointer;transition:opacity .3s ease,transform .3s ease}.toast-leaving{opacity:0;transform:translateY(-8px)}

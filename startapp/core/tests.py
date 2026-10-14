@@ -10,6 +10,7 @@ from unittest.mock import patch
 from urllib.error import HTTPError, URLError
 
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.utils.datastructures import MultiValueDict
@@ -25,7 +26,7 @@ from .ai_assistant import RentalAssistantError, _interpret_request
 from .forms import RentalListingForm
 from .models import (
     Booking, BookingOrder, ChatMessage, ContactMessage, Conversation, District,
-    HostProfile, ListingImage, PendingRegistration, Region, RentalListing,
+    HostProfile, ListingImage, ListingReview, PendingRegistration, Region, RentalListing,
     TelegramAccount, UserProfile,
 )
 from .telegram import notify_booking_parties
@@ -34,7 +35,7 @@ User = get_user_model()
 
 
 # Keep tests offline and independent of a developer's local .env secrets.
-@override_settings(TELEGRAM_BOT_TOKEN="", OPENAI_API_KEY="", PUBLIC_SITE_URL="")
+@override_settings(TELEGRAM_BOT_TOKEN="", GEMINI_API_KEY="", PUBLIC_SITE_URL="")
 class StartAppBaseTest(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(username="demo-user", password="SafePass123!", email="demo@example.com")
@@ -97,7 +98,7 @@ class WebsiteTests(StartAppBaseTest):
         self.assertIn("new MutationObserver", source)
         self.assertIn("O'qilmagan yangi xabarlar", source)
 
-    @override_settings(OPENAI_API_KEY="")
+    @override_settings(GEMINI_API_KEY="")
     def test_ai_chat_is_sitewide_and_explains_disabled_configuration(self):
         for path in (
             reverse("home"),
@@ -107,10 +108,10 @@ class WebsiteTests(StartAppBaseTest):
             self.assertEqual(response.status_code, 200)
             self.assertContains(response, 'data-ai-widget data-enabled="false"')
             self.assertContains(response, "AI yordamchi hozircha ishlamaydi")
-            self.assertContains(response, "OPENAI_API_KEY")
+            self.assertContains(response, "GEMINI_API_KEY")
         self.assertNotContains(self.client.get(reverse("home")), "data-ai-search")
 
-    @override_settings(OPENAI_API_KEY="test-openai-key")
+    @override_settings(GEMINI_API_KEY="test-gemini-key")
     def test_enabled_ai_chat_posts_to_existing_rental_endpoint(self):
         response = self.client.get(reverse("home"))
         self.assertEqual(response.status_code, 200)
@@ -184,11 +185,11 @@ class WebsiteTests(StartAppBaseTest):
             "Toshkentda 4 kishilik uy, 3 kun, arzonroq", language="ru",
         )
 
-    @override_settings(OPENAI_API_KEY="test-openai-key")
+    @override_settings(GEMINI_API_KEY="test-gemini-key")
     def test_ai_prompt_uses_the_selected_ui_language_for_assistant_replies(self):
         response_content = {"choices": [{"message": {"content": "{}"}}]}
         with patch(
-            "core.ai_assistant.urlopen",
+            "core.gemini.urlopen",
             return_value=BytesIO(json.dumps(response_content).encode("utf-8")),
         ) as openai_request:
             _interpret_request("Where can I rent?", language="ru")
@@ -236,16 +237,35 @@ class WebsiteTests(StartAppBaseTest):
         self.assertEqual(ticket.message, "To'lovim bo'yicha yordam kerak.")
         self.assertIsNone(ticket.user)
 
-    @override_settings(OPENAI_API_KEY="test-openai-key")
+    @override_settings(GEMINI_API_KEY="test-gemini-key")
     def test_ai_error_identifies_rate_limit_without_exposing_provider_payload(self):
-        error = HTTPError("https://api.openai.com", 429, "Too Many Requests", {}, BytesIO(b"private response"))
-        with patch("core.ai_assistant.urlopen", side_effect=error):
+        error = HTTPError("https://generativelanguage.googleapis.com", 429, "Too Many Requests", {}, BytesIO(b"private response"))
+        with patch("core.gemini.urlopen", side_effect=error):
             with self.assertRaises(RentalAssistantError) as raised:
                 _interpret_request("Toshkentda uy top")
-        self.assertIn("billing", str(raised.exception))
+        self.assertIn("limiti", str(raised.exception))
         self.assertNotIn("private response", str(raised.exception))
 
-    @override_settings(OPENAI_API_KEY="")
+    @override_settings(GEMINI_API_KEY="test-gemini-key", GEMINI_MODEL="main-model", GEMINI_FALLBACK_MODELS=["backup-model"])
+    def test_gemini_falls_back_to_next_model_and_remembers_exhausted_quota(self):
+        cache.clear()
+        ok = {"choices": [{"message": {"content": "{}"}}]}
+        quota = HTTPError(
+            "https://generativelanguage.googleapis.com", 429, "Too Many Requests", {},
+            BytesIO(b"Quota exceeded. Please retry in 14h49m53.7s."),
+        )
+        with patch("core.gemini.urlopen", side_effect=[quota, BytesIO(json.dumps(ok).encode())]) as request:
+            _interpret_request("Toshkentda uy top")
+        used = [json.loads(call.args[0].data)["model"] for call in request.call_args_list]
+        self.assertEqual(used, ["main-model", "backup-model"])
+
+        # The exhausted model is skipped until its quota resets.
+        with patch("core.gemini.urlopen", return_value=BytesIO(json.dumps(ok).encode())) as request:
+            _interpret_request("Toshkentda uy top")
+        self.assertEqual(json.loads(request.call_args.args[0].data)["model"], "backup-model")
+        cache.clear()
+
+    @override_settings(GEMINI_API_KEY="")
     def test_ai_rental_search_reports_missing_api_key(self):
         response = self.client.post(
             reverse("ai-rental-search"),
@@ -253,7 +273,7 @@ class WebsiteTests(StartAppBaseTest):
             content_type="application/json",
         )
         self.assertEqual(response.status_code, 503)
-        self.assertIn("OPENAI_API_KEY", response.json()["detail"])
+        self.assertIn("GEMINI_API_KEY", response.json()["detail"])
 
     def test_ai_rental_search_rejects_oversized_prompts(self):
         response = self.client.post(
@@ -520,8 +540,18 @@ class AccountLocationAndProviderTests(StartAppBaseTest):
         self.assertTrue(UserProfile.objects.filter(user=self.user, telegram_account=account).exists())
 
         response = self.client.post(reverse("provider-onboarding"), {"display_name": "Aziz uy ijarasi"})
-        self.assertRedirects(response, reverse("provider-dashboard"))
-        self.assertTrue(HostProfile.objects.filter(user=self.user).exists())
+        self.assertEqual(response.status_code, 200)  # Logo and company phone are required.
+        self.assertFalse(HostProfile.objects.filter(user=self.user).exists())
+        with TemporaryDirectory() as media_root, override_settings(MEDIA_ROOT=media_root):
+            response = self.client.post(reverse("provider-onboarding"), {
+                "display_name": "Aziz uy ijarasi", "phone_number": "90 111 22 33", "logo": self._png_upload("aziz-logo.png"),
+            })
+            self.assertRedirects(response, reverse("provider-dashboard"))
+            host = HostProfile.objects.get(user=self.user)
+            self.assertEqual(host.phone_number, "+998901112233")
+            # The uploaded name is never kept: files get a random name.
+            self.assertTrue(host.logo.name.startswith("host-logos/"))
+            self.assertNotIn("aziz", host.logo.name)
 
     def test_unverified_user_cannot_start_provider_onboarding(self):
         self.client.force_login(self.user)
@@ -1012,7 +1042,7 @@ class ProviderListingFormTests(StartAppBaseTest):
         self.region = Region.objects.get(pk=14)
         self.district = District.objects.filter(region=self.region).first()
         self.media = TemporaryDirectory()
-        self.media_override = override_settings(MEDIA_ROOT=self.media.name, OPENAI_API_KEY="")
+        self.media_override = override_settings(MEDIA_ROOT=self.media.name, GEMINI_API_KEY="")
         self.media_override.enable()
 
     def tearDown(self):
@@ -1107,7 +1137,7 @@ class ProviderListingFormTests(StartAppBaseTest):
             "title_ru": "Новое объявление", "title_en": "New listing",
             "description_ru": "Описание", "description_en": "Description",
         }
-        with override_settings(OPENAI_API_KEY="test-key"), \
+        with override_settings(GEMINI_API_KEY="test-key"), \
                 patch("core.listing_translation._request_translations", return_value=translated) as request:
             data = {**self._common("home"), "bedrooms": "2", "bathrooms": "1", "title_en": "My own title"}
             self.client.post(reverse("provider-create-listing"), data)
@@ -1118,8 +1148,8 @@ class ProviderListingFormTests(StartAppBaseTest):
         self.assertEqual(listing.description_en, "Description")
 
     def test_translation_failure_does_not_block_listing_creation(self):
-        with override_settings(OPENAI_API_KEY="test-key"), \
-                patch("core.listing_translation.urlopen", side_effect=URLError("offline")):
+        with override_settings(GEMINI_API_KEY="test-key"), \
+                patch("core.gemini.urlopen", side_effect=URLError("offline")):
             data = {**self._common("home"), "bedrooms": "2", "bathrooms": "1"}
             response = self.client.post(reverse("provider-create-listing"), data)
         self.assertRedirects(response, reverse("provider-dashboard"))
@@ -1326,3 +1356,374 @@ class ApiTests(StartAppBaseTest):
             "check_out": self.day_after.isoformat(), "guests": 2,
         }, format="json")
         self.assertEqual(response.status_code, 400)
+
+
+
+def _png_file(name="photo.png", size=(8, 8)):
+    data = BytesIO()
+    Image.new("RGB", size, color="green").save(data, format="PNG")
+    return SimpleUploadedFile(name, data.getvalue(), content_type="image/png")
+
+
+class AccountAndProfileTests(StartAppBaseTest):
+    def test_every_user_gets_a_uid_and_profile_shows_id_uid_and_logout(self):
+        self.assertTrue(self.user.account.uid)
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("profile"))
+        self.assertContains(response, str(self.user.account.uid))
+        self.assertContains(response, f"ID: <b data-no-translate=\"true\">{self.user.pk}</b>")
+        self.assertContains(response, reverse("logout"))
+        self.assertContains(response, reverse("profile-edit"))
+
+    def test_user_can_change_name_and_avatar(self):
+        self.client.force_login(self.user)
+        with TemporaryDirectory() as media_root, override_settings(MEDIA_ROOT=media_root):
+            response = self.client.post(reverse("profile-edit"), {
+                "first_name": "  Aziz ", "last_name": "Karimov", "avatar": _png_file("me.png"),
+            })
+            self.assertRedirects(response, reverse("profile"))
+            self.user.refresh_from_db()
+            self.assertEqual((self.user.first_name, self.user.last_name), ("Aziz", "Karimov"))
+            self.assertTrue(self.user.account.avatar.name.startswith("avatars/"))
+            response = self.client.post(reverse("profile-edit"), {"first_name": "Aziz", "remove_avatar": "on"})
+            self.user.account.refresh_from_db()
+            self.assertFalse(self.user.account.avatar)
+
+    def test_avatar_must_be_a_real_image(self):
+        self.client.force_login(self.user)
+        fake = SimpleUploadedFile("evil.png", b"<script>alert(1)</script>", content_type="image/png")
+        response = self.client.post(reverse("profile-edit"), {"first_name": "Aziz", "avatar": fake})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("avatar", response.context["form"].errors)
+        self.assertFalse(self.user.account.avatar)
+
+
+class CompanyReviewAndSimilarTests(StartAppBaseTest):
+    def setUp(self):
+        super().setUp()
+        self.provider = User.objects.create_user(username="host", password="test-pass")
+        self.host = HostProfile.objects.create(user=self.provider, display_name="Musulman Rent", phone_number="+998901112233")
+        self.home.owner = self.provider
+        self.home.save(update_fields=["owner"])
+        self.other_home = RentalListing.objects.create(
+            kind=RentalListing.Kind.HOME, title="Second home", city="Toshkent", address="Yunusobod",
+            description="Another home", price_per_day=Decimal("260000"), capacity=4, owner=self.provider,
+        )
+
+    def test_listing_shows_company_card_and_similar_listings(self):
+        response = self.client.get(reverse("listing-detail", args=[self.home.slug]))
+        self.assertContains(response, "Musulman Rent")
+        self.assertContains(response, "tel:+998901112233")
+        self.assertContains(response, "O'xshash e'lonlar")
+        self.assertContains(response, "Second home")
+        self.assertNotContains(response, "Test car")  # Similar = same kind only.
+
+    def test_user_can_rate_and_comment_once_and_update(self):
+        self.client.force_login(self.user)
+        url = reverse("listing-review", args=[self.home.slug])
+        self.assertRedirects(self.client.post(url, {"rating": "4", "comment": "Juda yaxshi"}),
+                             reverse("listing-detail", args=[self.home.slug]) + "#reviews", fetch_redirect_response=False)
+        self.client.post(url, {"rating": "5", "comment": "Zo'r"})
+        review = ListingReview.objects.get(listing=self.home, user=self.user)
+        self.assertEqual((review.rating, review.comment), (5, "Zo'r"))
+        response = self.client.get(reverse("listing-detail", args=[self.home.slug]))
+        self.assertContains(response, "Zo&#x27;r")
+        self.assertContains(response, "★★★★★")
+
+    def test_rating_must_be_between_one_and_five_and_owner_cannot_review(self):
+        self.client.force_login(self.user)
+        response = self.client.post(reverse("listing-review", args=[self.home.slug]), {"rating": "9"})
+        self.assertEqual(response.status_code, 400)
+        self.client.force_login(self.provider)
+        self.client.post(reverse("listing-review", args=[self.home.slug]), {"rating": "5"})
+        self.assertFalse(ListingReview.objects.exists())
+
+    def test_provider_dashboard_search_and_filters(self):
+        self.client.force_login(self.provider)
+        response = self.client.get(reverse("provider-dashboard"), {"q": "Second"})
+        self.assertContains(response, "Second home")
+        self.assertNotContains(response, ">Test apartment<")
+        response = self.client.get(reverse("provider-dashboard"), {"kind": "car"})
+        self.assertNotContains(response, "Second home")
+
+    def test_provider_can_update_company_details(self):
+        self.client.force_login(self.provider)
+        with TemporaryDirectory() as media_root, override_settings(MEDIA_ROOT=media_root):
+            response = self.client.post(reverse("provider-company"), {
+                "display_name": "New Name", "phone_number": "+998 90 999 88 77", "logo": _png_file(),
+            })
+        self.assertRedirects(response, reverse("provider-dashboard"))
+        self.host.refresh_from_db()
+        self.assertEqual((self.host.display_name, self.host.phone_number), ("New Name", "+998909998877"))
+
+
+class SupportChatTests(StartAppBaseTest):
+    def setUp(self):
+        super().setUp()
+        self.admin = User.objects.create_user(username="helper", password="test-pass", is_staff=True)
+
+    def test_contact_admin_opens_the_users_support_chat(self):
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("contact-admin"))
+        conversation = Conversation.objects.get(kind=Conversation.Kind.SUPPORT, customer=self.user)
+        self.assertRedirects(response, reverse("chat-room", args=[conversation.pk]))
+        self.assertContains(self.client.get(reverse("chat-room", args=[conversation.pk])), "Rentora Admin")
+        # Opening it again reuses the same chat.
+        self.client.get(reverse("contact-admin"))
+        self.assertEqual(Conversation.objects.filter(kind=Conversation.Kind.SUPPORT).count(), 1)
+
+    def test_admin_reply_shows_as_rentora_admin_with_read_receipts(self):
+        self.client.force_login(self.user)
+        conversation = Conversation.objects.get(pk=self.client.get(reverse("contact-admin")).url.strip("/").split("/")[-1])
+        response = self.client.post(reverse("chat-room", args=[conversation.pk]), {"text": "Salom, yordam kerak"},
+                                    HTTP_ACCEPT="application/json")
+        self.assertEqual(response.status_code, 201)
+        sent = response.json()["message"]
+        self.assertTrue(sent["mine"])
+        self.assertFalse(sent["read"])
+        conversation.refresh_from_db()
+        self.assertEqual(conversation.support_status, Conversation.SupportStatus.WAITING)
+
+        self.client.force_login(self.admin)
+        thread = self.client.get(reverse("helper-support-thread", args=[conversation.pk]))
+        self.assertContains(thread, "Salom, yordam kerak")
+        self.client.post(reverse("chat-room", args=[conversation.pk]), {"text": "Albatta, yordam beramiz"})
+        conversation.refresh_from_db()
+        self.assertEqual(conversation.support_status, Conversation.SupportStatus.ANSWERED)
+
+        self.client.force_login(self.user)
+        data = self.client.get(reverse("chat-messages-api", args=[conversation.pk]), {"after": 0}).json()
+        reply = data["messages"][-1]
+        self.assertEqual(reply["sender"], "Rentora Admin")  # The admin's own name stays private.
+        self.assertFalse(reply["mine"])
+        self.assertTrue(data["messages"][0]["read"])  # The admin has read the user's message.
+
+    def test_other_users_cannot_open_someone_elses_support_chat(self):
+        conversation = Conversation.objects.create(kind=Conversation.Kind.SUPPORT, customer=self.user)
+        outsider = User.objects.create_user(username="outsider", password="test-pass")
+        self.client.force_login(outsider)
+        self.assertEqual(self.client.get(reverse("chat-room", args=[conversation.pk])).status_code, 404)
+        self.assertEqual(self.client.get(reverse("helper-support")).status_code, 404)
+
+    def test_inbox_shows_per_chat_unread_badge(self):
+        provider = User.objects.create_user(username="prov", password="test-pass")
+        self.home.owner = provider
+        self.home.save(update_fields=["owner"])
+        conversation = Conversation.objects.create(listing=self.home, customer=self.user, provider=provider)
+        ChatMessage.objects.create(conversation=conversation, sender=provider, text="Bir")
+        ChatMessage.objects.create(conversation=conversation, sender=provider, text="Ikki")
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("chat-inbox"))
+        self.assertContains(response, 'class="tg-badge" aria-label="O\'qilmagan xabarlar: 2">2</span>')
+        self.assertEqual(self.client.get(reverse("chat-unread-status")).json()["count"], 2)
+
+    def test_video_upload_and_range_requests(self):
+        conversation = Conversation.objects.create(kind=Conversation.Kind.SUPPORT, customer=self.user)
+        video = SimpleUploadedFile("clip.mp4", b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 2000, content_type="video/mp4")
+        self.client.force_login(self.user)
+        with TemporaryDirectory() as chat_root, override_settings(CHAT_MEDIA_ROOT=chat_root):
+            from .models import chat_media_storage
+            chat_media_storage.location = chat_root
+            chat_media_storage.__dict__.pop("base_location", None)
+            chat_media_storage.__dict__.pop("location", None)
+            response = self.client.post(reverse("chat-room", args=[conversation.pk]), {"attachment": video},
+                                        HTTP_ACCEPT="application/json")
+            self.assertEqual(response.status_code, 201, response.content)
+            message = response.json()["message"]
+            self.assertEqual(message["attachment_type"], "video")
+            media = self.client.get(message["attachment_url"], HTTP_RANGE="bytes=0-99")
+            self.assertEqual(media.status_code, 206)
+            self.assertEqual(media["Content-Range"], "bytes 0-99/2012")
+            self.assertEqual(len(b"".join(media.streaming_content)), 100)
+            self.assertIn("sandbox", media["Content-Security-Policy"])
+
+    def test_disguised_file_is_rejected(self):
+        conversation = Conversation.objects.create(kind=Conversation.Kind.SUPPORT, customer=self.user)
+        self.client.force_login(self.user)
+        fake = SimpleUploadedFile("movie.mp4", b"<html><script>alert(1)</script></html>", content_type="video/mp4")
+        response = self.client.post(reverse("chat-room", args=[conversation.pk]), {"attachment": fake},
+                                    HTTP_ACCEPT="application/json")
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(ChatMessage.objects.exists())
+
+
+class SupportAITests(StartAppBaseTest):
+    def test_ai_tools_only_expose_the_asking_users_own_bookings(self):
+        from .support_ai import build_tools
+        other = User.objects.create_user(username="other", password="test-pass", email="secret@example.com")
+        Booking.objects.create(user=other, listing=self.car, check_in=self.tomorrow, check_out=self.day_after)
+        Booking.objects.create(user=self.user, listing=self.home, check_in=self.tomorrow, check_out=self.day_after)
+        tools = {tool.name: tool for tool in build_tools(self.user, {"escalated": False})}
+        self.assertEqual(set(tools), {"search_listings", "get_listing", "my_bookings", "escalate_to_admin"})
+        mine = tools["my_bookings"].function()
+        self.assertEqual([row["listing"] for row in mine["bookings"]], ["Test apartment"])
+        dumped = json.dumps(tools["search_listings"].function(), default=str)
+        self.assertNotIn("secret@example.com", dumped)
+        self.assertNotIn("other", dumped)
+
+    @override_settings(SUPPORT_AI_DELAY_SECONDS=0)
+    def test_worker_answers_unanswered_chats_as_rentora_admin(self):
+        from .chat import post_message
+        from .support_ai import answer_conversation, conversations_needing_ai
+        conversation = Conversation.objects.create(kind=Conversation.Kind.SUPPORT, customer=self.user)
+        post_message(conversation, self.user, text="Toshkentda uy bormi?")
+        self.assertEqual(conversations_needing_ai(), [conversation])
+        with patch("core.support_ai.run_agent", return_value="Ha, bor: Test apartment."):
+            answer_conversation(conversation)
+        conversation.refresh_from_db()
+        self.assertEqual(conversation.support_status, Conversation.SupportStatus.AI)
+        reply = conversation.messages.order_by("-pk").first()
+        self.assertTrue(reply.is_ai)
+        self.assertEqual(reply.display_sender(self.user), "Rentora Admin")
+        self.assertEqual(conversations_needing_ai(), [])
+
+    @override_settings(SUPPORT_AI_DELAY_SECONDS=3600)
+    def test_ai_waits_for_admins_first(self):
+        from .chat import post_message
+        from .support_ai import conversations_needing_ai
+        conversation = Conversation.objects.create(kind=Conversation.Kind.SUPPORT, customer=self.user)
+        post_message(conversation, self.user, text="Savol")
+        self.assertEqual(conversations_needing_ai(), [])
+
+    def test_admin_ai_is_read_only_and_staff_only(self):
+        from .admin_ai import build_tools
+        names = {tool.name for tool in build_tools()}
+        self.assertFalse(any(word in name for name in names for word in ("create", "delete", "update", "block")))
+        self.client.force_login(self.user)
+        response = self.client.post(reverse("helper-ai"), data=json.dumps({"message": "hi"}), content_type="application/json")
+        self.assertEqual(response.status_code, 404)
+
+
+class HelperPanelTests(StartAppBaseTest):
+    def setUp(self):
+        super().setUp()
+        self.admin = User.objects.create_user(username="helper", password="test-pass", is_staff=True)
+        self.boss = User.objects.create_superuser(username="boss", password="test-pass")
+        self.booking = Booking.objects.create(user=self.user, listing=self.home, check_in=self.tomorrow, check_out=self.day_after)
+
+    def test_regular_users_cannot_open_the_panel(self):
+        self.client.force_login(self.user)
+        for name in ("helper-dashboard", "helper-support", "helper-bookings", "helper-users", "helper-products", "helper-chats"):
+            self.assertEqual(self.client.get(reverse(name)).status_code, 404, name)
+
+    def test_staff_can_search_and_filter_every_section(self):
+        self.client.force_login(self.admin)
+        self.assertContains(self.client.get(reverse("helper-dashboard")), "AI yordamchi")
+        self.assertContains(self.client.get(reverse("helper-bookings"), {"q": f"#{self.booking.pk}"}), "Test apartment")
+        self.assertNotContains(self.client.get(reverse("helper-bookings"), {"status": "cancelled"}), "Test apartment")
+        self.assertContains(self.client.get(reverse("helper-users"), {"q": "demo-user"}), "demo@example.com")
+        self.assertContains(self.client.get(reverse("helper-users"), {"q": str(self.user.account.uid)}), "demo-user")
+        self.assertContains(self.client.get(reverse("helper-products"), {"kind": "car"}), "Test car")
+        self.assertNotContains(self.client.get(reverse("helper-products"), {"kind": "car"}), "Test apartment")
+
+    def test_staff_can_cancel_a_booking_and_hide_a_listing(self):
+        self.client.force_login(self.admin)
+        with patch("core.helper_views.notify_booking_parties"), self.captureOnCommitCallbacks(execute=True):
+            self.client.post(reverse("helper-booking-cancel", args=[self.booking.pk]))
+        self.booking.refresh_from_db()
+        self.assertEqual(self.booking.status, Booking.Status.CANCELLED)
+        self.client.post(reverse("helper-product-toggle", args=[self.car.pk]))
+        self.car.refresh_from_db()
+        self.assertFalse(self.car.is_active)
+
+    def test_only_the_superuser_adds_or_deletes_users_and_admins(self):
+        self.client.force_login(self.admin)
+        self.client.post(reverse("helper-user-create"), {
+            "username": "newbie", "password1": "Strong-Pass-123", "password2": "Strong-Pass-123",
+        })
+        self.assertFalse(User.objects.filter(username="newbie").exists())
+        victim = User.objects.create_user(username="victim", password="test-pass")
+        self.client.post(reverse("helper-user-action", args=[victim.pk, "delete"]))
+        self.assertTrue(User.objects.filter(pk=victim.pk).exists())
+
+        self.client.force_login(self.boss)
+        self.client.post(reverse("helper-user-create"), {
+            "username": "newadmin", "password1": "Strong-Pass-123", "password2": "Strong-Pass-123", "is_staff": "on",
+        })
+        self.assertTrue(User.objects.get(username="newadmin").is_staff)
+        self.client.post(reverse("helper-user-action", args=[victim.pk, "delete"]))
+        self.assertFalse(User.objects.filter(pk=victim.pk).exists())
+        self.client.post(reverse("helper-user-action", args=[self.boss.pk, "delete"]))
+        self.assertTrue(User.objects.filter(pk=self.boss.pk).exists())
+
+    def test_listing_chats_are_read_only_for_staff(self):
+        provider = User.objects.create_user(username="prov", password="test-pass")
+        conversation = Conversation.objects.create(listing=self.home, customer=self.user, provider=provider)
+        ChatMessage.objects.create(conversation=conversation, sender=provider, text="Narxi qancha?")
+        self.client.force_login(self.admin)
+        self.assertContains(self.client.get(reverse("helper-chat-view", args=[conversation.pk])), "Narxi qancha?")
+        conversation.refresh_from_db()
+        self.assertEqual(conversation.customer_last_read_message_id, 0)
+        self.assertEqual(self.client.get(reverse("chat-room", args=[conversation.pk])).status_code, 404)
+
+
+class SecurityTests(StartAppBaseTest):
+    def test_login_is_blocked_after_repeated_failures(self):
+        for _ in range(8):
+            self.client.post(reverse("login"), {"username": "demo-user", "password": "wrong"})
+        response = self.client.post(reverse("login"), {"username": "demo-user", "password": "SafePass123!"})
+        self.assertEqual(response.status_code, 429)
+
+    def test_pages_send_a_content_security_policy(self):
+        response = self.client.get(reverse("home"))
+        self.assertIn("script-src 'self'", response["Content-Security-Policy"])
+        self.assertEqual(response["X-Frame-Options"], "DENY")
+
+    def test_listing_photo_names_are_randomized(self):
+        listing_image = ListingImage(listing=self.home)
+        with TemporaryDirectory() as media_root, override_settings(MEDIA_ROOT=media_root):
+            listing_image.image = _png_file("../../evil.html")
+            listing_image.save()
+            self.assertRegex(listing_image.image.name, r"^listing-images/\d{4}/\d{2}/[0-9a-f]{32}\.jpg$")
+        from .uploads import validate_image_upload
+        upload = validate_image_upload(_png_file("evil.html"))
+        self.assertEqual(upload.name, "upload.png")
+
+
+class SeedCatalogTests(StartAppBaseTest):
+    def test_wipe_keeps_users_and_creates_homes_and_cars_for_the_provider(self):
+        from .management.commands.seed_catalog import CAR_MODELS
+        provider = User.objects.create_user(username="mmmm", password="test-pass")
+        HostProfile.objects.create(user=provider, display_name="musulman")
+        Booking.objects.create(user=self.user, listing=self.home, check_in=self.tomorrow, check_out=self.day_after)
+        with TemporaryDirectory() as photos, TemporaryDirectory() as media_root, override_settings(MEDIA_ROOT=media_root):
+            for folder, names in (("home", ["1600607687939-ce8a6c25118c", "1564013799919-ab600027ffc6"]), ("car", list(CAR_MODELS))):
+                (Path(photos) / folder).mkdir()
+                for name in names:
+                    Image.new("RGB", (8, 8)).save(Path(photos) / folder / f"{name}.jpg")
+            call_command("seed_catalog", owner="mmmm", count=6, photos=photos, wipe=True, stdout=StringIO())
+            self.assertEqual(Booking.objects.count(), 0)
+            self.assertTrue(User.objects.filter(pk=self.user.pk).exists())
+            self.assertEqual(RentalListing.objects.filter(owner=provider, kind="home").count(), 3)
+            self.assertEqual(RentalListing.objects.filter(owner=provider, kind="car").count(), 3)
+            self.assertTrue(all(listing.title_ru and listing.title_en for listing in RentalListing.objects.all()))
+            self.assertTrue(all(listing.images.exists() for listing in RentalListing.objects.all()))
+
+
+class DjangoAdminHardeningTests(TestCase):
+    def setUp(self):
+        self.admin_index = reverse("admin:index")
+
+    def test_anonymous_admin_visit_goes_to_site_login(self):
+        response = self.client.get(self.admin_index)
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response["Location"].startswith(reverse("login") + "?next="))
+        login_page = self.client.get(reverse("admin:login"))
+        self.assertEqual(login_page.status_code, 302)
+        self.assertTrue(login_page["Location"].startswith(reverse("login")))
+
+    def test_helper_admin_and_regular_user_get_not_found(self):
+        for is_staff in (True, False):
+            user = get_user_model().objects.create_user(f"user{is_staff}", password="pass-12345", is_staff=is_staff)
+            self.client.force_login(user)
+            self.assertEqual(self.client.get(self.admin_index).status_code, 404)
+            self.client.logout()
+
+    def test_head_admin_opens_admin_without_caching(self):
+        boss = get_user_model().objects.create_superuser("boss", password="pass-12345")
+        self.client.force_login(boss)
+        response = self.client.get(self.admin_index)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Rentora — bosh admin")
+        self.assertIn("no-store", response["Cache-Control"])
+        self.assertIn("noindex", response["X-Robots-Tag"])

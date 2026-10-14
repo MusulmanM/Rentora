@@ -1,0 +1,37 @@
+{% extends 'core/helper/base.html' %}
+{% load core_tags %}
+{% block helper_title %}Foydalanuvchilar{% endblock %}
+{% block helper_content %}
+<div class="helper-head"><div><p class="section-kicker">HISOBLAR</p><h1>Foydalanuvchilar</h1></div>{% if request.user.is_superuser %}<a class="btn btn-dark" href="{% url 'helper-user-create' %}">＋ Foydalanuvchi yoki admin qo'shish</a>{% endif %}</div>
+<form method="get" class="helper-filters" role="search">
+  <input type="search" name="q" value="{{ query }}" placeholder="ID, UID, ism, login, email yoki telefon" aria-label="Qidirish">
+  <select name="role" aria-label="Rol">
+    <option value="">Barchasi</option>
+    <option value="provider"{% if role == 'provider' %} selected{% endif %}>Ijara beruvchilar</option>
+    <option value="staff"{% if role == 'staff' %} selected{% endif %}>Adminlar</option>
+    <option value="verified"{% if role == 'verified' %} selected{% endif %}>Telefoni tasdiqlangan</option>
+    <option value="unverified"{% if role == 'unverified' %} selected{% endif %}>Telefoni tasdiqlanmagan</option>
+    <option value="inactive"{% if role == 'inactive' %} selected{% endif %}>Bloklangan</option>
+  </select>
+  <button class="btn btn-dark btn-small" type="submit">Qidirish</button>
+</form>
+<section class="helper-card">
+  <div class="helper-table-wrap"><table class="helper-table">
+    <thead><tr><th>ID</th><th>Foydalanuvchi</th><th>Telefon</th><th>Rol</th><th>Bronlar</th><th>E'lonlar</th><th>Ro'yxatdan o'tgan</th></tr></thead>
+    <tbody>
+    {% for member in page %}
+    <tr>
+      <td>{{ member.pk }}</td>
+      <td><a class="helper-user-cell" href="{% url 'helper-user-detail' member.pk %}">{% user_avatar member "review-avatar" %}<span><b data-no-translate="true">{{ member.get_full_name|default:member.username }}</b><small class="helper-muted" data-no-translate="true">@{{ member.username }} · {{ member.email|default:"—" }}</small></span></a></td>
+      <td data-no-translate="true">{{ member.profile.phone_number|default:"—" }}</td>
+      <td>{% if member.is_superuser %}<span class="role-badge role-super">Bosh admin</span>{% elif member.is_staff %}<span class="role-badge role-staff">Admin</span>{% endif %}{% if member.host_profile %}<span class="role-badge">Ijara beruvchi</span>{% endif %}{% if not member.is_active %}<span class="role-badge role-blocked">Bloklangan</span>{% endif %}</td>
+      <td>{{ member.booking_total }}</td>
+      <td>{{ member.listing_total }}</td>
+      <td>{{ member.date_joined|date:'d.m.Y' }}</td>
+    </tr>
+    {% empty %}<tr><td colspan="7" class="helper-muted">Foydalanuvchilar topilmadi.</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+</section>
+{% include 'core/partials/pagination.html' %}
+{% endblock %}

@@ -1,34 +1,61 @@
 {% extends 'core/base.html' %}
+{% load core_tags %}
 {% block title %}Profil — Rentora{% endblock %}
 {% block content %}
 <header class="site-header wrap" data-unread-endpoint="{% url 'chat-unread-status' %}">
   <a class="brand" href="{% url 'home' %}"><span class="brand-symbol"><i></i><i></i><i></i></span><span>Rentora</span></a>
   <nav class="main-nav" id="main-nav"><a href="{% url 'home' %}">Bosh sahifa</a><a href="{% url 'chat-inbox' %}">Chatlar<span class="unread-dot" data-unread-indicator role="img" aria-label="O'qilmagan yangi xabarlar"{% if not has_unread_chat_messages %} hidden{% endif %}></span></a><a href="{% url 'my-bookings' %}">Bronlarim</a><a class="nav-active" href="{% url 'profile' %}">Profil</a></nav>
-  <div class="header-actions">{% include 'core/language_switcher.html' %}<a class="user-pill" href="{% url 'profile' %}" aria-label="Profil">{{ request.user.first_name|default:request.user.username|first|upper }}</a></div>
+  <div class="header-actions">{% include 'core/language_switcher.html' %}<a class="user-pill" href="{% url 'profile' %}" aria-label="Profil">{% user_avatar request.user "user-pill-avatar" %}</a></div>
   <button class="mobile-menu-button" data-menu-toggle aria-controls="main-nav" aria-label="Menyuni ochish" aria-expanded="false">☰</button>
 </header>
-<main class="bookings-main wrap">
-  <div class="bookings-welcome"><div><p class="section-kicker">SHAXSIY KABINET</p><h1>Profil</h1><p>{{ request.user.first_name|default:request.user.username }}, hisobingiz va ijara faoliyatingizni shu yerdan boshqaring.</p></div><a class="btn btn-outline" href="{% url 'my-bookings' %}">Bronlarim</a></div>
+<main class="bookings-main wrap profile-main">
+  <section class="profile-hero">
+    {% user_avatar request.user "profile-avatar" %}
+    <div class="profile-hero-text">
+      <p class="section-kicker">SHAXSIY KABINET</p>
+      <h1 data-no-translate="true">{{ request.user.get_full_name|default:request.user.username }}</h1>
+      <p class="profile-ids"><span>ID: <b data-no-translate="true">{{ request.user.pk }}</b></span><span>UID: <b data-no-translate="true">{{ account.uid }}</b></span></p>
+    </div>
+    <a class="btn btn-dark" href="{% url 'profile-edit' %}">✎ Profilni tahrirlash</a>
+  </section>
+
   <section class="profile-panel">
     <h2>Hisob ma'lumotlari</h2>
-    <p><b>Foydalanuvchi:</b> {{ request.user.username }}</p>
-    <p><b>Elektron pochta:</b> {{ request.user.email }}</p>
-    {% if profile %}<p><b>Tasdiqlangan telefon:</b> {{ profile.phone_number }}</p>
-    {% else %}<p class="profile-notice">Telefon raqamingiz Telegram orqali tasdiqlanmagan.</p><a class="btn btn-dark" href="{% url 'verify-profile-phone' %}">Telefonni tasdiqlash</a>{% endif %}
+    <dl class="profile-facts">
+      <div><dt>Foydalanuvchi nomi</dt><dd data-no-translate="true">{{ request.user.username }}</dd></div>
+      <div><dt>Elektron pochta</dt><dd data-no-translate="true">{{ request.user.email|default:"—" }}</dd></div>
+      <div><dt>Telefon</dt><dd>{% if profile %}<span data-no-translate="true">{{ profile.phone_number }}</span> <span class="verified-badge">✓ Tasdiqlangan</span>{% else %}<span class="profile-notice">Telegram orqali tasdiqlanmagan</span>{% endif %}</dd></div>
+      <div><dt>Ro'yxatdan o'tgan</dt><dd>{{ request.user.date_joined|date:'d.m.Y' }}</dd></div>
+    </dl>
+    {% if not profile %}<a class="btn btn-dark" href="{% url 'verify-profile-phone' %}">Telefonni tasdiqlash</a>{% endif %}
   </section>
+
   <section class="profile-panel">
     <h2>Ijara beruvchi bo'lish</h2>
     {% if host_profile %}
-      <p><b>{{ host_profile.display_name }}</b> — ijara beruvchi profilingiz faol.</p>
+      <div class="company-inline">{% if host_profile.logo %}<img src="{{ host_profile.logo.url }}" alt="" class="company-logo-small">{% endif %}<p><b data-no-translate="true">{{ host_profile.display_name }}</b> — ijara beruvchi profilingiz faol.</p></div>
       <a class="btn btn-dark" href="{% url 'provider-dashboard' %}">E'lonlarim va panelim <span>→</span></a>
     {% else %}
       <p>Shu hisob bilan ijaraga beruvchi sifatida ro'yxatdan o'ting. Telefon tasdiqlangach, darhol e'lon qo'shishingiz mumkin.</p>
       <a class="btn btn-dark" href="{% url 'provider-onboarding' %}">Ijara beruvchi sifatida ro'yxatdan o'tish <span>→</span></a>
     {% endif %}
   </section>
+
+  {% if request.user.is_staff %}
   <section class="profile-panel">
-    <h2>Yordam kerakmi?</h2><p>Adminlarga saytdagi forma orqali xabar yuboring.</p>
+    <h2>Admin panel</h2>
+    <p>Foydalanuvchilar xabarlari, bronlar, foydalanuvchilar va e'lonlarni boshqarish.</p>
+    <a class="btn btn-dark" href="{% url 'helper-dashboard' %}">Helper-admin panelni ochish <span>→</span></a>
+  </section>
+  {% endif %}
+
+  <section class="profile-panel">
+    <h2>Yordam kerakmi?</h2><p>Adminga saytdagi chat orqali yozing.</p>
     <a class="btn btn-outline" href="{% url 'contact-admin' %}">Admin bilan bog'lanish</a>
   </section>
+
+  <form method="post" action="{% url 'logout' %}" class="profile-logout" data-confirm="Hisobdan chiqasizmi?">
+    {% csrf_token %}<button class="btn btn-danger-outline" type="submit">⎋ Hisobdan chiqish</button>
+  </form>
 </main>
 {% endblock %}

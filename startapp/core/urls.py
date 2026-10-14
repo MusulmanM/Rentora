@@ -1,6 +1,6 @@
 from django.contrib.auth import views as auth_views
 from django.urls import path
-from . import views
+from . import helper_views, views
 from .payments import click_callback, payme_callback
 
 urlpatterns = [
@@ -12,11 +12,13 @@ urlpatterns = [
     path("accounts/register/resend-otp/", views.resend_registration_otp, name="resend-registration-otp"),
     path("telegram/webhook/", views.telegram_webhook, name="telegram-webhook"),
     path("profile/", views.user_profile, name="profile"),
+    path("profile/edit/", views.profile_edit, name="profile-edit"),
     path("profile/phone/", views.verify_profile_phone, name="verify-profile-phone"),
     path("profile/phone/confirm/", views.confirm_profile_phone, name="confirm-profile-phone"),
     path("profile/phone/resend/", views.resend_profile_phone_otp, name="resend-profile-phone-otp"),
     path("contact/", views.contact_admin, name="contact-admin"),
     path("provider/register/", views.provider_onboarding, name="provider-onboarding"),
+    path("provider/company/", views.provider_company, name="provider-company"),
     path("provider/", views.provider_dashboard, name="provider-dashboard"),
     path("provider/listings/<int:listing_id>/availability/", views.update_listing_availability, name="provider-listing-availability"),
     path("provider/bookings/<int:booking_id>/<str:action>/", views.update_provider_booking, name="provider-booking-action"),
@@ -31,6 +33,7 @@ urlpatterns = [
     path("chats/media/<int:message_id>/", views.chat_media, name="chat-media"),
     path("listing/<slug:slug>/", views.listing_detail, name="listing-detail"),
     path("listing/<slug:slug>/book/", views.create_booking, name="create-booking"),
+    path("listing/<slug:slug>/review/", views.post_review, name="listing-review"),
     path("my-bookings/", views.my_bookings, name="my-bookings"),
     path("my-bookings/<int:booking_id>/cancel/", views.cancel_booking, name="cancel-booking"),
     path("my-bookings/orders/<int:order_id>/pay/", views.pay_booking_order, name="pay-booking-order"),
@@ -38,6 +41,23 @@ urlpatterns = [
     path("payments/click/callback/", click_callback, name="click-payment-callback"),
     path("payments/payme/callback/", payme_callback, name="payme-payment-callback"),
     path("health/", views.health, name="health"),
+    path("helper/", helper_views.dashboard, name="helper-dashboard"),
+    path("helper/support/", helper_views.support_list, name="helper-support"),
+    path("helper/support/<int:conversation_id>/", helper_views.support_thread, name="helper-support-thread"),
+    path("helper/chats/", helper_views.chats_list, name="helper-chats"),
+    path("helper/chats/<int:conversation_id>/", helper_views.chat_view, name="helper-chat-view"),
+    path("helper/bookings/", helper_views.bookings, name="helper-bookings"),
+    path("helper/bookings/<int:booking_id>/cancel/", helper_views.booking_cancel, name="helper-booking-cancel"),
+    path("helper/users/", helper_views.users, name="helper-users"),
+    path("helper/users/new/", helper_views.user_create, name="helper-user-create"),
+    path("helper/users/<int:user_id>/", helper_views.user_detail, name="helper-user-detail"),
+    path("helper/users/<int:user_id>/<str:action>/", helper_views.user_action, name="helper-user-action"),
+    path("helper/products/", helper_views.products, name="helper-products"),
+    path("helper/products/<int:listing_id>/toggle/", helper_views.product_toggle, name="helper-product-toggle"),
+    path("helper/contacts/", helper_views.contacts, name="helper-contacts"),
+    path("helper/contacts/<int:message_id>/read/", helper_views.contact_read, name="helper-contact-read"),
+    path("helper/ai/", helper_views.ai_ask, name="helper-ai"),
+    path("helper/unread/", helper_views.unread_counts, name="helper-unread"),
     path("api/ai/rentals/", views.ai_rental_search, name="ai-rental-search"),
     path("api/listings/", views.listings_api, name="api-listings"),
     path("api/listings/<int:listing_id>/", views.listing_detail_api, name="api-listing-detail"),

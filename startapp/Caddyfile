@@ -1,0 +1,13 @@
+# HTTPS in front of Rentora. Caddy gets and renews a free Let's Encrypt certificate for $DOMAIN
+# automatically (the domain's DNS A record must point to this server, ports 80 and 443 open).
+# In .env set: PUBLIC_SITE_URL=https://<domain>, DJANGO_ALLOWED_HOSTS=<domain>,
+# CSRF_TRUSTED_ORIGINS=https://<domain>, DJANGO_BEHIND_HTTPS_PROXY=1, TRUST_X_REAL_IP=1
+{$DOMAIN} {
+	encode gzip
+	request_body {
+		max_size 260MB
+	}
+	reverse_proxy web:8000 {
+		header_up X-Real-IP {remote_host}
+	}
+}

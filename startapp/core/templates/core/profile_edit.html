@@ -1,0 +1,27 @@
+{% extends 'core/base.html' %}
+{% load core_tags %}
+{% block title %}Profilni tahrirlash — Rentora{% endblock %}
+{% block body_class %}auth-body{% endblock %}
+{% block content %}
+<div class="auth-shell">
+  <div class="auth-language">{% include 'core/language_switcher.html' %}</div>
+  <a class="brand auth-brand" href="{% url 'home' %}"><span class="brand-symbol"><i></i><i></i><i></i></span><span>Rentora</span></a>
+  <div class="auth-card">
+    <a class="auth-back-link" href="{% url 'profile' %}">← Profil</a>
+    <div class="profile-edit-avatar">{% user_avatar request.user "profile-avatar" %}</div>
+    <p class="section-kicker">PROFIL</p><h1>Profilni tahrirlash</h1>
+    <form method="post" enctype="multipart/form-data" class="auth-form">
+      {% csrf_token %}
+      {% if form.non_field_errors %}<div class="form-error-box">{{ form.non_field_errors }}</div>{% endif %}
+      {% for field in form %}
+      {% if field.name == 'remove_avatar' %}
+        {% if account.avatar %}<label class="checkbox-row">{{ field }} {{ field.label }}</label>{% endif %}
+      {% else %}
+      <div class="form-field"><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% if field.errors %}<small class="field-error">{{ field.errors|striptags }}</small>{% endif %}</div>
+      {% endif %}
+      {% endfor %}
+      <button class="btn btn-dark auth-submit" type="submit">O'zgarishlarni saqlash <span>→</span></button>
+    </form>
+  </div>
+</div>
+{% endblock %}

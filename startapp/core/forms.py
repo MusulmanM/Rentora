@@ -1,16 +1,17 @@
 import re
 
 from django import forms
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.forms import UserCreationForm
 from django.core.exceptions import ValidationError
 from django.utils import timezone
-from PIL import Image, UnidentifiedImageError
 
 from .models import (
-    Booking, BookingOrder, ChatMessage, ContactMessage, District, HostProfile, ListingImage,
+    Booking, BookingOrder, ChatMessage, ContactMessage, District, HostProfile, ListingImage, ListingReview,
     PendingPhoneVerification, PendingRegistration, Region, RentalListing, UserProfile,
 )
+from .uploads import validate_image_upload, validate_media_upload
 
 User = get_user_model()
 
@@ -182,16 +183,7 @@ class MultipleFileField(forms.FileField):
             cleaned_file = super().clean(uploaded_file, initial)
             if cleaned_file.size > 10 * 1024 * 1024:
                 raise ValidationError("Har bir rasm hajmi 10 MB dan oshmasligi kerak.")
-            try:
-                with Image.open(cleaned_file) as image:
-                    if image.width * image.height > 40_000_000:
-                        raise ValidationError("Rasm o'lchami juda katta.")
-                    image.verify()
-            except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError):
-                raise ValidationError("Faqat haqiqiy rasm fayllarini yuklang.")
-            finally:
-                cleaned_file.seek(0)
-            cleaned_files.append(cleaned_file)
+            cleaned_files.append(validate_image_upload(cleaned_file))
         return cleaned_files
 
 
@@ -419,11 +411,94 @@ class RentalListingForm(forms.ModelForm):
 
 
 class HostOnboardingForm(forms.ModelForm):
+    """Company profile of a provider: name, logo and phone are all required."""
+    # Wider than the stored value: "+998 90 123 45 67" is normalized to "+998901234567".
+    phone_number = forms.CharField(label="Kompaniya telefoni", max_length=24)
+
     class Meta:
         model = HostProfile
-        fields = ("display_name",)
-        labels = {"display_name": "Ijara beruvchi nomi"}
-        widgets = {"display_name": forms.TextInput(attrs={"class": "form-input", "placeholder": "Ismingiz yoki biznes nomi"})}
+        fields = ("display_name", "logo", "phone_number")
+        labels = {
+            "display_name": "Kompaniya nomi",
+            "logo": "Kompaniya logotipi",
+            "phone_number": "Kompaniya telefoni",
+        }
+        widgets = {
+            "display_name": forms.TextInput(attrs={"class": "form-input", "placeholder": "Masalan: Musulman Rent"}),
+            "logo": forms.ClearableFileInput(attrs={"class": "form-input", "accept": "image/*"}),
+            "phone_number": forms.TextInput(attrs={
+                "class": "form-input", "placeholder": "+998 90 123 45 67", "autocomplete": "tel",
+            }),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            field.required = True
+        if self.instance.pk and self.instance.logo:
+            self.fields["logo"].required = False
+            self.fields["logo"].help_text = "Yangi logotip tanlamasangiz, avvalgisi qoladi."
+        self.fields["logo"].widget = forms.FileInput(attrs={"class": "form-input", "accept": "image/*"})
+
+    def clean_display_name(self):
+        name = " ".join(self.cleaned_data["display_name"].split())
+        if len(name) < 2:
+            raise ValidationError("Kompaniya nomini kiriting.")
+        return name
+
+    def clean_logo(self):
+        logo = self.cleaned_data.get("logo")
+        if logo and hasattr(logo, "content_type"):  # A newly uploaded file, not the stored one.
+            return validate_image_upload(logo, max_bytes=5 * 1024 * 1024, label="Logotip")
+        return logo
+
+    def clean_phone_number(self):
+        return normalize_phone_number(self.cleaned_data["phone_number"])
+
+
+class ProfileEditForm(forms.Form):
+    first_name = forms.CharField(label="Ism", max_length=150, widget=forms.TextInput(attrs={"class": "form-input"}))
+    last_name = forms.CharField(
+        label="Familiya", max_length=150, required=False, widget=forms.TextInput(attrs={"class": "form-input"}),
+    )
+    avatar = forms.ImageField(
+        label="Profil rasmi", required=False,
+        widget=forms.FileInput(attrs={"class": "form-input", "accept": "image/*"}),
+    )
+    remove_avatar = forms.BooleanField(label="Rasmni o'chirish", required=False)
+
+    def clean_first_name(self):
+        name = " ".join(self.cleaned_data["first_name"].split())
+        if not name:
+            raise ValidationError("Ismingizni kiriting.")
+        return name
+
+    def clean_last_name(self):
+        return " ".join(self.cleaned_data.get("last_name", "").split())
+
+    def clean_avatar(self):
+        avatar = self.cleaned_data.get("avatar")
+        if avatar:
+            return validate_image_upload(avatar, max_bytes=5 * 1024 * 1024, label="Rasm")
+        return avatar
+
+
+class ListingReviewForm(forms.ModelForm):
+    rating = forms.TypedChoiceField(
+        label="Baho", coerce=int, choices=[(value, str(value)) for value in range(5, 0, -1)],
+        widget=forms.RadioSelect,
+    )
+
+    class Meta:
+        model = ListingReview
+        fields = ("rating", "comment")
+        labels = {"comment": "Izoh"}
+        widgets = {"comment": forms.Textarea(attrs={
+            "class": "form-input", "rows": 3, "maxlength": 2000, "placeholder": "Tajribangiz haqida yozing",
+        })}
+
+    def clean_comment(self):
+        return self.cleaned_data.get("comment", "").strip()
 
 
 class ContactMessageForm(forms.ModelForm):
@@ -452,16 +527,20 @@ class ListingAvailabilityForm(forms.Form):
 class ChatMessageForm(forms.ModelForm):
     attachment = forms.FileField(
         required=False,
-        label="Rasm yoki ovozli xabar",
-        widget=forms.ClearableFileInput(attrs={"class": "form-input", "accept": "image/*,audio/*"}),
+        label="Rasm, video yoki ovozli xabar",
+        widget=forms.ClearableFileInput(attrs={"class": "form-input", "accept": "image/*,video/*,audio/*"}),
+    )
+    # The voice recorder marks its .webm recordings as audio; other .webm files are videos.
+    attachment_kind = forms.ChoiceField(
+        required=False, choices=[("", ""), ("audio", "audio"), ("video", "video")], widget=forms.HiddenInput,
     )
 
     class Meta:
         model = ChatMessage
         fields = ("text",)
         labels = {"text": "Xabar"}
-        widgets = {"text": forms.TextInput(attrs={
-            "class": "form-input", "maxlength": 5000, "placeholder": "Xabaringizni yozing",
+        widgets = {"text": forms.Textarea(attrs={
+            "class": "form-input", "maxlength": 5000, "rows": 1, "placeholder": "Xabar yozing...",
         })}
 
     def clean(self):
@@ -469,25 +548,50 @@ class ChatMessageForm(forms.ModelForm):
         text = (cleaned.get("text") or "").strip()
         attachment = cleaned.get("attachment")
         if not text and not attachment:
-            raise ValidationError("Xabar matni yoki rasm/ovozli fayl yuboring.")
+            raise ValidationError("Xabar matni yoki rasm/video/ovozli fayl yuboring.")
         if attachment:
-            if attachment.size > 15 * 1024 * 1024:
-                raise ValidationError("Rasm yoki ovozli xabar 15 MB dan oshmasligi kerak.")
+            limit = settings.CHAT_ATTACHMENT_MAX_BYTES
+            if attachment.size > limit:
+                raise ValidationError(f"Fayl hajmi {limit // (1024 * 1024)} MB dan oshmasligi kerak.")
             extension = attachment.name.rsplit(".", 1)[-1].lower() if "." in attachment.name else ""
-            if extension in {"jpg", "jpeg", "png", "webp", "gif"}:
+            if extension in {"jpg", "jpeg", "png", "webp", "gif", "avif"}:
                 try:
-                    with Image.open(attachment) as image:
-                        if image.width * image.height > 40_000_000:
-                            raise ValidationError("Rasm o'lchami juda katta.")
-                        image.verify()
-                except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError):
+                    validate_image_upload(attachment, max_bytes=limit)
+                except ValidationError:
                     raise ValidationError("Faqat haqiqiy rasm faylini yuboring.")
-                finally:
-                    attachment.seek(0)
                 cleaned["attachment_type"] = ChatMessage.AttachmentType.IMAGE
-            elif extension in {"ogg", "oga", "opus", "mp3", "wav", "m4a", "aac", "webm"}:
-                cleaned["attachment_type"] = ChatMessage.AttachmentType.AUDIO
             else:
-                raise ValidationError("Faqat rasm yoki audio xabar yuborish mumkin.")
+                kind = validate_media_upload(attachment, cleaned.get("attachment_kind", ""))
+                cleaned["attachment_type"] = (
+                    ChatMessage.AttachmentType.VIDEO if kind == "video" else ChatMessage.AttachmentType.AUDIO
+                )
+            # The model's own validation (run after this) must see the file too.
+            self.instance.attachment = attachment
+            self.instance.attachment_type = cleaned["attachment_type"]
         cleaned["text"] = text
         return cleaned
+
+
+class HelperUserCreateForm(UserCreationForm):
+    """Bosh admin creates a user or an admin from the helper panel."""
+    first_name = forms.CharField(label="Ism", max_length=150, required=False)
+    email = forms.EmailField(label="Elektron pochta", required=False)
+    is_staff = forms.BooleanField(label="Admin (helper-admin paneliga kira oladi)", required=False)
+
+    class Meta:
+        model = User
+        fields = ("username", "first_name", "email", "is_staff", "password1", "password2")
+        labels = {"username": "Foydalanuvchi nomi"}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            if not isinstance(field.widget, forms.CheckboxInput):
+                field.widget.attrs.setdefault("class", "form-input")
+            field.help_text = ""
+
+    def clean_email(self):
+        email = (self.cleaned_data.get("email") or "").strip().lower()
+        if email and User.objects.filter(email__iexact=email).exists():
+            raise ValidationError("Bu elektron pochta allaqachon ro'yxatdan o'tgan.")
+        return email

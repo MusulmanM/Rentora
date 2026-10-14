@@ -2,6 +2,8 @@ from django import forms
 from django.contrib import admin
 from django.core.exceptions import ValidationError
 from django.forms.models import BaseInlineFormSet
+from django.http import Http404
+from django.shortcuts import redirect
 from django.utils.html import format_html
 
 from .models import (
@@ -9,6 +11,7 @@ from .models import (
     RentalListing, UserProfile, Conversation,
 )
 from .forms import DistrictSelect
+from .uploads import validate_image_upload
 
 
 class ListingImageInlineFormSet(BaseInlineFormSet):
@@ -33,8 +36,8 @@ class ListingImageForm(forms.ModelForm):
 
     def clean_image(self):
         image = self.cleaned_data.get("image")
-        if image and not getattr(image, "_committed", False) and image.size > 10 * 1024 * 1024:
-            raise ValidationError("Har bir rasm hajmi 10 MB dan oshmasligi kerak.")
+        if image and not getattr(image, "_committed", False):
+            return validate_image_upload(image)
         return image
 
 
@@ -150,3 +153,25 @@ class ConversationAdmin(admin.ModelAdmin):
     list_display = ("listing", "customer", "provider", "updated_at")
     search_fields = ("listing__title", "customer__username", "provider__username")
     readonly_fields = tuple(field.name for field in Conversation._meta.fields)
+
+
+# The Django admin is for the head admin only; helper admins work in /helper/.
+# It has no login form of its own: core.security.SecurityMiddleware sends visitors to the
+# site's rate-limited login page and answers 404 to signed-in users who are not superusers.
+admin.site.site_header = "Rentora — bosh admin"
+admin.site.site_title = "Rentora bosh admin"
+admin.site.index_title = "Boshqaruv"
+
+
+def _superuser_only(request):
+    return request.user.is_active and request.user.is_superuser
+
+
+def _admin_login(request, extra_context=None):
+    if _superuser_only(request):
+        return redirect("admin:index")
+    raise Http404
+
+
+admin.site.has_permission = _superuser_only
+admin.site.login = _admin_login

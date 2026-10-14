@@ -1,0 +1,32 @@
+{% extends 'core/base.html' %}
+{% load static core_tags %}
+{% block title %}{% block helper_title %}Helper-admin{% endblock %} — Rentora{% endblock %}
+{% block body_class %}helper-body{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'core/chat.css' %}?v=20261014-tg1"><link rel="stylesheet" href="{% static 'core/helper.css' %}?v=20261014-v2">{% endblock %}
+{% block ai_widget %}{% endblock %}
+{% block content %}
+<div class="helper-shell" data-helper-unread="{% url 'helper-unread' %}">
+  <aside class="helper-sidebar">
+    <a class="brand helper-brand" href="{% url 'helper-dashboard' %}"><span class="brand-symbol"><i></i><i></i><i></i></span><span>Rentora</span></a>
+    <p class="helper-role">{% if request.user.is_superuser %}Bosh admin{% else %}Admin{% endif %} · <span data-no-translate="true">{{ request.user.get_full_name|default:request.user.username }}</span></p>
+    <nav class="helper-nav" aria-label="Admin bo'limlari">
+      <a href="{% url 'helper-dashboard' %}"{% if section == 'dashboard' %} class="is-active" aria-current="page"{% endif %}><span aria-hidden="true">◧</span> Bosh panel</a>
+      <a href="{% url 'helper-support' %}"{% if section == 'support' %} class="is-active" aria-current="page"{% endif %}><span aria-hidden="true">✉</span> Admin xabarlari <b class="helper-count" data-count="support" hidden></b></a>
+      <a href="{% url 'helper-chats' %}"{% if section == 'chats' %} class="is-active" aria-current="page"{% endif %}><span aria-hidden="true">☷</span> Foydalanuvchi chatlari</a>
+      <a href="{% url 'helper-bookings' %}"{% if section == 'bookings' %} class="is-active" aria-current="page"{% endif %}><span aria-hidden="true">▣</span> Bronlar</a>
+      <a href="{% url 'helper-users' %}"{% if section == 'users' %} class="is-active" aria-current="page"{% endif %}><span aria-hidden="true">♙</span> Foydalanuvchilar</a>
+      <a href="{% url 'helper-products' %}"{% if section == 'products' %} class="is-active" aria-current="page"{% endif %}><span aria-hidden="true">⌂</span> E'lonlar</a>
+      <a href="{% url 'helper-contacts' %}"{% if section == 'contacts' %} class="is-active" aria-current="page"{% endif %}><span aria-hidden="true">✎</span> Forma xabarlari <b class="helper-count" data-count="contacts" hidden></b></a>
+    </nav>
+    <div class="helper-sidebar-foot">
+      {% include 'core/language_switcher.html' %}
+      <a href="{% url 'home' %}">← Saytga qaytish</a>
+      {% if request.user.is_superuser %}<a href="/{{ admin_url }}">Django admin ↗</a>{% endif %}
+    </div>
+  </aside>
+  <main class="helper-main">
+    {% block helper_content %}{% endblock %}
+  </main>
+</div>
+{% endblock %}
+{% block scripts %}<script src="{% static 'core/helper.js' %}?v=20261014-v2" defer></script>{% block helper_scripts %}{% endblock %}{% endblock %}

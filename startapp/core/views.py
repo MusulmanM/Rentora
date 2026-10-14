@@ -2,7 +2,6 @@ from datetime import date
 from datetime import timedelta
 import json
 import logging
-import mimetypes
 import secrets
 
 from django.conf import settings
@@ -12,9 +11,11 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.views import LoginView
 from django.contrib.auth.hashers import check_password, make_password
 from django.core.exceptions import ValidationError
+from django.core.paginator import Paginator
 from django.db import IntegrityError, transaction
-from django.db.models import F, Q
-from django.http import FileResponse, Http404, JsonResponse
+from django.db.models import Avg, Case, Count, F, IntegerField, Q, Value, When
+from django.db.models.functions import Abs
+from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -26,16 +27,22 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 from .availability import ACTIVE_BOOKING_STATUSES, active_bookings, can_view_listing, listings_visible_to
+from .chat import (
+    conversations_for, mark_read, other_side_last_read, post_message,
+    serialize_message, support_conversation_for, unread_messages,
+)
 from .forms import (
-    BookingForm, ChatMessageForm, ContactMessageForm, HostOnboardingForm,
-    ListingAvailabilityForm, PhoneNumberForm, RegistrationForm, RegistrationOTPForm,
+    BookingForm, ChatMessageForm, ContactMessageForm, HostOnboardingForm, ListingAvailabilityForm,
+    ListingReviewForm, PhoneNumberForm, ProfileEditForm, RegistrationForm, RegistrationOTPForm,
     RentalListingForm,
 )
+from .media import serve_private_file
 from .models import (
-    Booking, BookingOrder, District, HostProfile, PendingRegistration,
+    Booking, BookingOrder, District, HostProfile, ListingReview, PendingRegistration,
     PendingPhoneVerification, Region, RentalListing, ListingImage, TelegramAccount,
-    UserProfile, Conversation, ChatMessage,
+    UserProfile, Conversation, ChatMessage, account_for,
 )
+from .security import rate_limited
 from .payments import payment_url
 from .serializers import BookingSerializer, ListingSerializer
 from .ai_assistant import RentalAssistantError, find_rentals
@@ -131,9 +138,11 @@ def home(request):
     listings = listings.filter(capacity__gte=guests)
     listings = _available_for_dates(listings, check_in, check_out)
     listings = listings.order_by("-is_featured", "-created_at")
+    page = Paginator(listings, 24).get_page(request.GET.get("page"))
 
     context = {
-        "listings": listings,
+        "listings": page,
+        "page": page,
         "regions": Region.objects.all(),
         "districts": District.objects.select_related("region").all(),
         "selected_kind": kind,
@@ -161,6 +170,7 @@ class StartAppLoginView(LoginView):
         return context
 
 
+@rate_limited("register", limit=10, window=3600)
 def register(request):
     if request.user.is_authenticated:
         return redirect("my-bookings")
@@ -532,21 +542,73 @@ def telegram_webhook(request):
     return JsonResponse({"ok": True})
 
 
-def _listing_detail_context(request, listing, form):
+def _similar_listings(listing, user, limit=4):
+    """Same type first, then same region, then the closest daily price."""
+    return (
+        listings_visible_to(user, RentalListing.objects.select_related("region", "district").prefetch_related("images"))
+        .filter(kind=listing.kind)
+        .exclude(pk=listing.pk)
+        .annotate(
+            same_region=Case(When(region_id=listing.region_id, then=Value(1)), default=Value(0), output_field=IntegerField()),
+            price_gap=Abs(F("price_per_day") - listing.price_per_day),
+        )
+        .order_by("-same_region", "price_gap")[:limit]
+    )
+
+
+def _listing_detail_context(request, listing, form, review_form=None):
     current_booking = active_bookings().filter(listing=listing).select_related("user").first()
-    owner_profile = UserProfile.objects.filter(
-        user_id=listing.owner_id,
-    ).select_related("telegram_account").first() if listing.owner_id else None
+    host_profile = HostProfile.objects.filter(user_id=listing.owner_id).first() if listing.owner_id else None
+    reviews = listing.reviews.select_related("user", "user__account")
+    review_stats = reviews.aggregate(average=Avg("rating"), count=Count("id"))
+    is_owner = request.user.is_authenticated and listing.owner_id == request.user.pk
+    own_review = reviews.filter(user=request.user).first() if request.user.is_authenticated else None
+    if review_form is None and request.user.is_authenticated and not is_owner:
+        review_form = ListingReviewForm(instance=own_review)
     return {
         "listing": listing, "form": form, "today": timezone.localdate().isoformat(),
         "current_booking": current_booking,
         "can_book_listing": (
             listing.availability_status == RentalListing.AvailabilityStatus.ACTIVE
             and current_booking is None
-            and not (request.user.is_authenticated and listing.owner_id == request.user.pk)
+            and not is_owner
         ),
-        "owner_profile": owner_profile,
+        "host_profile": host_profile,
+        "reviews": reviews[:50],
+        "review_average": review_stats["average"],
+        "review_count": review_stats["count"],
+        "review_form": review_form,
+        "own_review": own_review,
+        "similar_listings": _similar_listings(listing, request.user),
     }
+
+
+@login_required
+@require_POST
+@rate_limited("review", limit=10, window=3600, by="user")
+def post_review(request, slug):
+    listing = get_object_or_404(
+        RentalListing.objects.select_related("region", "district").prefetch_related("images"), slug=slug,
+    )
+    if not can_view_listing(request.user, listing):
+        raise Http404
+    if listing.owner_id == request.user.pk:
+        messages.error(request, "O'z e'loningizga baho bera olmaysiz.")
+        return redirect("listing-detail", slug=slug)
+    review = ListingReview.objects.filter(listing=listing, user=request.user).first()
+    review_form = ListingReviewForm(request.POST, instance=review)
+    if review_form.is_valid():
+        review = review_form.save(commit=False)
+        review.listing = listing
+        review.user = request.user
+        review.save()
+        messages.success(request, "Izohingiz uchun rahmat!")
+        return redirect(f"{reverse('listing-detail', args=[slug])}#reviews")
+    booking_form = BookingForm(listing=listing, user=request.user)
+    return render(
+        request, "core/listing_detail.html",
+        _listing_detail_context(request, listing, booking_form, review_form=review_form), status=400,
+    )
 
 
 def listing_detail(request, slug):
@@ -661,12 +723,33 @@ def my_bookings(request):
 def user_profile(request):
     profile = UserProfile.objects.filter(user=request.user).select_related("telegram_account").first()
     host_profile = HostProfile.objects.filter(user=request.user).first()
-    listings = RentalListing.objects.filter(owner=request.user).order_by("-created_at") if host_profile else ()
     return render(request, "core/profile.html", {
         "profile": profile,
         "host_profile": host_profile,
-        "listings": listings,
+        "account": account_for(request.user),
     })
+
+
+@login_required
+def profile_edit(request):
+    account = account_for(request.user)
+    form = ProfileEditForm(
+        request.POST or None, request.FILES or None,
+        initial={"first_name": request.user.first_name, "last_name": request.user.last_name},
+    )
+    if request.method == "POST" and form.is_valid():
+        request.user.first_name = form.cleaned_data["first_name"]
+        request.user.last_name = form.cleaned_data["last_name"]
+        request.user.save(update_fields=["first_name", "last_name"])
+        avatar = form.cleaned_data.get("avatar")
+        if avatar or form.cleaned_data.get("remove_avatar"):
+            if account.avatar:
+                account.avatar.delete(save=False)
+            account.avatar = avatar or ""
+            account.save(update_fields=["avatar"])
+        messages.success(request, "Profil yangilandi.")
+        return redirect("profile")
+    return render(request, "core/profile_edit.html", {"form": form, "account": account})
 
 
 @login_required
@@ -674,10 +757,9 @@ def provider_onboarding(request):
     if not UserProfile.objects.filter(user=request.user).exists():
         messages.error(request, "Ijara beruvchi bo'lish uchun telefon raqamingizni Telegram orqali tasdiqlang.")
         return redirect("profile")
-    existing = HostProfile.objects.filter(user=request.user).first()
-    if existing:
+    if HostProfile.objects.filter(user=request.user).exists():
         return redirect("provider-dashboard")
-    form = HostOnboardingForm(request.POST or None)
+    form = HostOnboardingForm(request.POST or None, request.FILES or None)
     if request.method == "POST" and form.is_valid():
         host_profile = form.save(commit=False)
         host_profile.user = request.user
@@ -688,23 +770,60 @@ def provider_onboarding(request):
 
 
 @login_required
+def provider_company(request):
+    host_profile = get_object_or_404(HostProfile, user=request.user)
+    old_logo = host_profile.logo.name if host_profile.logo else ""
+    form = HostOnboardingForm(request.POST or None, request.FILES or None, instance=host_profile)
+    if request.method == "POST" and form.is_valid():
+        host_profile = form.save()
+        if old_logo and host_profile.logo.name != old_logo:
+            host_profile.logo.storage.delete(old_logo)
+        messages.success(request, "Kompaniya ma'lumotlari yangilandi.")
+        return redirect("provider-dashboard")
+    return render(request, "core/provider_onboarding.html", {"form": form, "is_edit": True})
+
+
+@login_required
 def provider_dashboard(request):
     host_profile = get_object_or_404(HostProfile, user=request.user)
     listings = RentalListing.objects.filter(owner=request.user).select_related("region", "district").prefetch_related("images")
+    query = request.GET.get("q", "").strip()[:100]
+    kind = request.GET.get("kind", "")
+    status_filter = request.GET.get("status", "")
+    booking_status = request.GET.get("booking_status", "")
+    if query:
+        listings = listings.filter(
+            Q(title__icontains=query) | Q(title_ru__icontains=query) | Q(title_en__icontains=query)
+            | Q(brand__icontains=query) | Q(address__icontains=query) | Q(city__icontains=query)
+        )
+    if kind in RentalListing.Kind.values:
+        listings = listings.filter(kind=kind)
+    if status_filter in RentalListing.AvailabilityStatus.values:
+        listings = listings.filter(availability_status=status_filter)
     provider_bookings = Booking.objects.filter(
         listing__owner=request.user,
         status__in=ACTIVE_BOOKING_STATUSES,
         check_out__gt=timezone.localdate(),
     ).select_related("listing", "user").prefetch_related("listing__images")
+    if booking_status in (Booking.Status.PENDING, Booking.Status.CONFIRMED, Booking.Status.HANDED_OVER):
+        provider_bookings = provider_bookings.filter(status=booking_status)
+    if query:
+        provider_bookings = provider_bookings.filter(
+            Q(listing__title__icontains=query) | Q(user__username__icontains=query) | Q(user__first_name__icontains=query)
+        )
     return render(request, "core/provider_dashboard.html", {
         "host_profile": host_profile,
-        "provider_has_telegram": UserProfile.objects.filter(user=request.user).exists(),
         "listings": listings,
+        "listing_total": RentalListing.objects.filter(owner=request.user).count(),
         "provider_bookings": provider_bookings,
+        "provider_has_telegram": UserProfile.objects.filter(user=request.user).exists(),
         "rented_listing_ids": set(
-            provider_bookings.filter(status=Booking.Status.HANDED_OVER)
-            .values_list("listing_id", flat=True)
+            Booking.objects.filter(
+                listing__owner=request.user, status=Booking.Status.HANDED_OVER, check_out__gt=timezone.localdate(),
+            ).values_list("listing_id", flat=True)
         ),
+        "filters": {"q": query, "kind": kind, "status": status_filter, "booking_status": booking_status},
+        "is_filtered": bool(query or kind or status_filter or booking_status),
     })
 
 
@@ -832,15 +951,11 @@ def edit_listing(request, listing_id):
 
 
 def contact_admin(request):
-    initial = {}
     if request.user.is_authenticated:
-        initial = {"name": request.user.get_full_name(), "email": request.user.email}
-    form = ContactMessageForm(request.POST or None, initial=initial)
+        return redirect("chat-room", conversation_id=support_conversation_for(request.user).pk)
+    form = ContactMessageForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
-        contact_message = form.save(commit=False)
-        if request.user.is_authenticated:
-            contact_message.user = request.user
-        contact_message.save()
+        form.save()
         messages.success(request, "Xabaringiz administratorlarga yuborildi.")
         return redirect("contact-admin")
     return render(request, "core/contact.html", {"form": form})
@@ -858,7 +973,7 @@ def start_chat(request, slug):
     conversation, _ = Conversation.objects.get_or_create(
         listing=listing,
         customer=request.user,
-        defaults={"provider_id": listing.owner_id},
+        defaults={"provider_id": listing.owner_id, "kind": Conversation.Kind.LISTING},
     )
     return redirect("chat-room", conversation_id=conversation.pk)
 
@@ -881,57 +996,55 @@ def start_booking_chat(request, booking_id):
 
 @login_required
 def chat_inbox(request):
-    conversations = Conversation.objects.filter(
-        Q(customer=request.user) | Q(provider=request.user),
-    ).select_related("listing", "customer", "provider")
-    return render(request, "core/chat_inbox.html", {"conversations": conversations})
+    conversations = list(conversations_for(request.user))
+    return render(request, "core/chat_inbox.html", {
+        "conversations": conversations,
+        "unread_total": sum(conversation.unread_count for conversation in conversations),
+    })
 
 
-def _mark_conversation_read(conversation, user, message_id):
-    if not message_id:
-        return
-    if conversation.customer_id == user.pk:
-        Conversation.objects.filter(
-            pk=conversation.pk,
-            customer_last_read_message_id__lt=message_id,
-        ).update(customer_last_read_message_id=message_id)
-    elif conversation.provider_id == user.pk:
-        Conversation.objects.filter(
-            pk=conversation.pk,
-            provider_last_read_message_id__lt=message_id,
-        ).update(provider_last_read_message_id=message_id)
+def _conversation_for_user(user, conversation_id):
+    conversation = get_object_or_404(
+        Conversation.objects.select_related("listing", "customer", "provider"), pk=conversation_id,
+    )
+    if not conversation.is_participant(user):
+        raise Http404
+    return conversation
 
 
 @login_required
+@rate_limited("chat-send", limit=40, window=60, by="user")
 def chat_room(request, conversation_id):
-    conversation = get_object_or_404(
-        Conversation.objects.select_related("listing", "customer", "provider"),
-        Q(customer=request.user) | Q(provider=request.user),
-        pk=conversation_id,
-    )
+    conversation = _conversation_for_user(request.user, conversation_id)
+    wants_json = request.headers.get("Accept", "").startswith("application/json")
     if request.method == "POST":
         form = ChatMessageForm(request.POST, request.FILES)
         if form.is_valid():
-            message = form.save(commit=False)
-            message.conversation = conversation
-            message.sender = request.user
-            if form.cleaned_data.get("attachment"):
-                message.attachment_type = form.cleaned_data["attachment_type"]
-            message.full_clean()
-            message.save()
-            conversation.save(update_fields=["updated_at"])
+            message = post_message(
+                conversation, request.user, text=form.cleaned_data["text"],
+                attachment=form.cleaned_data.get("attachment"),
+                attachment_type=form.cleaned_data.get("attachment_type", ""),
+            )
+            if wants_json:
+                return JsonResponse({"message": serialize_message(
+                    message, request.user, other_side_last_read(conversation, request.user),
+                )}, status=201)
             return redirect("chat-room", conversation_id=conversation.pk)
+        if wants_json:
+            errors = [error for field_errors in form.errors.values() for error in field_errors]
+            return JsonResponse({"detail": " ".join(errors)}, status=400)
     else:
         form = ChatMessageForm()
     chat_messages = list(
-        conversation.messages.select_related("sender").order_by("-created_at", "-pk")[:200]
+        conversation.messages.select_related("sender", "conversation").order_by("-created_at", "-pk")[:200]
     )
     chat_messages.reverse()
     latest_message_id = chat_messages[-1].pk if chat_messages else 0
-    _mark_conversation_read(conversation, request.user, latest_message_id)
+    mark_read(conversation, request.user, latest_message_id)
+    other_read = other_side_last_read(conversation, request.user)
     return render(request, "core/chat_room.html", {
         "conversation": conversation,
-        "chat_messages": chat_messages,
+        "chat_messages": [serialize_message(message, request.user, other_read) for message in chat_messages],
         "latest_chat_message_id": latest_message_id,
         "form": form,
     })
@@ -940,64 +1053,37 @@ def chat_room(request, conversation_id):
 @login_required
 @require_GET
 def chat_messages_api(request, conversation_id):
-    conversation = get_object_or_404(
-        Conversation.objects.filter(Q(customer=request.user) | Q(provider=request.user)),
-        pk=conversation_id,
-    )
+    conversation = _conversation_for_user(request.user, conversation_id)
     try:
         after = max(0, int(request.GET.get("after", "0")))
     except (TypeError, ValueError):
         return JsonResponse({"detail": "after musbat butun son bo'lishi kerak."}, status=400)
     messages_qs = list(
-        conversation.messages.filter(pk__gt=after).select_related("sender").order_by("created_at", "pk")[:100]
+        conversation.messages.filter(pk__gt=after).select_related("sender", "conversation").order_by("created_at", "pk")[:100]
     )
     if messages_qs:
-        _mark_conversation_read(conversation, request.user, max(message.pk for message in messages_qs))
+        mark_read(conversation, request.user, max(message.pk for message in messages_qs))
+    other_read = other_side_last_read(conversation, request.user)
     return JsonResponse({
-        "messages": [{
-            "id": message.pk,
-            "sender": message.sender.get_full_name() or message.sender.get_username(),
-            "mine": message.sender_id == request.user.pk,
-            "text": message.text,
-            "attachment_type": message.attachment_type,
-            "attachment_url": reverse("chat-media", args=[message.pk]) if message.attachment else "",
-            "created_at": timezone.localtime(message.created_at).strftime("%d.%m.%Y %H:%M"),
-        } for message in messages_qs],
+        "messages": [serialize_message(message, request.user, other_read) for message in messages_qs],
+        "other_last_read_id": other_read,
     })
 
 
 @login_required
 @require_GET
 def chat_unread_status(request):
-    has_unread = ChatMessage.objects.filter(
-        Q(
-            conversation__customer=request.user,
-            pk__gt=F("conversation__customer_last_read_message_id"),
-        )
-        | Q(
-            conversation__provider=request.user,
-            pk__gt=F("conversation__provider_last_read_message_id"),
-        ),
-    ).exclude(sender=request.user).exists()
-    return JsonResponse({"has_unread": has_unread})
+    count = unread_messages(request.user).count()
+    return JsonResponse({"has_unread": bool(count), "count": count})
 
 
 @login_required
 @require_GET
 def chat_media(request, message_id):
-    message = get_object_or_404(
-        ChatMessage.objects.select_related("conversation"),
-        pk=message_id,
-    )
-    if request.user.pk not in (message.conversation.customer_id, message.conversation.provider_id):
+    message = get_object_or_404(ChatMessage.objects.select_related("conversation"), pk=message_id)
+    if not (message.conversation.is_participant(request.user) or request.user.is_staff) or not message.attachment:
         raise Http404
-    if not message.attachment:
-        raise Http404
-    file_handle = message.attachment.open("rb")
-    content_type = mimetypes.guess_type(message.attachment.name)[0] or "application/octet-stream"
-    response = FileResponse(file_handle, content_type=content_type)
-    response["X-Content-Type-Options"] = "nosniff"
-    return response
+    return serve_private_file(request, message.attachment)
 
 
 @require_GET
@@ -1067,6 +1153,7 @@ def health(request):
 
 
 @require_POST
+@rate_limited("ai-search", limit=20, window=600)
 def ai_rental_search(request):
     try:
         payload = json.loads(request.body)

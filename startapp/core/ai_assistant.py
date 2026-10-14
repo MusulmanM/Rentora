@@ -3,7 +3,6 @@ import logging
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
 
 from django.conf import settings
 from django.db.models import Q
@@ -11,11 +10,11 @@ from django.urls import reverse
 from django.utils import timezone
 
 from .availability import listings_visible_to
+from .gemini import chat_completion
 from .models import Booking, BookingOrder, RentalListing
 
 logger = logging.getLogger(__name__)
 
-_OPENAI_URL = "https://api.openai.com/v1/chat/completions"
 _SCHEMA = {
     "type": "object",
     "properties": {
@@ -50,13 +49,11 @@ class RentalAssistantError(Exception):
 
 
 def _interpret_request(message, language="uz"):
-    api_key = getattr(settings, "OPENAI_API_KEY", "")
-    if not api_key:
-        raise RentalAssistantError("AI qidiruv uchun OPENAI_API_KEY sozlanmagan.", status_code=503)
+    if not getattr(settings, "GEMINI_API_KEY", ""):
+        raise RentalAssistantError("AI qidiruv uchun GEMINI_API_KEY sozlanmagan.", status_code=503)
 
     today = timezone.localdate()
     payload = {
-        "model": getattr(settings, "OPENAI_MODEL", "gpt-4o-mini"),
         "messages": [
             {
                 "role": "system",
@@ -84,43 +81,36 @@ def _interpret_request(message, language="uz"):
             "json_schema": {"name": "rental_request", "strict": True, "schema": _SCHEMA},
         },
     }
-    request = Request(
-        _OPENAI_URL,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        method="POST",
-    )
     try:
-        with urlopen(request, timeout=20) as response:
-            result = json.loads(response.read())
+        result = chat_completion(payload, timeout=20)
     except HTTPError as exc:
-        logger.warning("OpenAI rental assistant returned HTTP %s", exc.code)
+        logger.warning("Gemini rental assistant returned HTTP %s", exc.code)
         messages = {
-            400: "OpenAI so'rovni rad etdi. OPENAI_MODEL qiymatini va model imkoniyatlarini tekshiring.",
-            401: "OPENAI_API_KEY noto'g'ri yoki bekor qilingan. Kalitni server sozlamalarida tekshiring.",
-            403: "OpenAI ushbu modelga kirishga ruxsat bermadi. Hisob va model ruxsatlarini tekshiring.",
-            404: "OPENAI_MODEL topilmadi. Model nomini server sozlamalarida tekshiring.",
-            429: "OpenAI limiti yoki krediti tugagan. Hisob billing va rate limit holatini tekshiring.",
+            400: "Gemini so'rovni rad etdi. GEMINI_MODEL qiymatini va model imkoniyatlarini tekshiring.",
+            401: "GEMINI_API_KEY noto'g'ri yoki bekor qilingan. Kalitni server sozlamalarida tekshiring.",
+            403: "Gemini ushbu modelga kirishga ruxsat bermadi. Hisob va model ruxsatlarini tekshiring.",
+            404: "GEMINI_MODEL topilmadi. Model nomini server sozlamalarida tekshiring.",
+            429: "AI yordamchining limiti vaqtincha tugagan. Birozdan keyin qayta urinib ko'ring.",
         }
         raise RentalAssistantError(
-            messages.get(exc.code, "OpenAI xizmati so'rovni qabul qilmadi. Birozdan keyin qayta urinib ko'ring."),
+            messages.get(exc.code, "Gemini xizmati so'rovni qabul qilmadi. Birozdan keyin qayta urinib ko'ring."),
             status_code=503 if exc.code in {401, 403, 404, 429} else 502,
         ) from exc
     except URLError as exc:
-        logger.warning("OpenAI rental assistant connection failed: %s", exc.reason)
+        logger.warning("Gemini rental assistant connection failed: %s", exc.reason)
         raise RentalAssistantError("AI xizmatiga ulanib bo'lmadi. Birozdan keyin qayta urinib ko'ring.") from exc
     except TimeoutError as exc:
-        logger.warning("OpenAI rental assistant request timed out")
+        logger.warning("Gemini rental assistant request timed out")
         raise RentalAssistantError("AI xizmatiga ulanib bo'lmadi. Birozdan keyin qayta urinib ko'ring.") from exc
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        logger.exception("OpenAI rental assistant returned invalid JSON")
+        logger.exception("Gemini rental assistant returned invalid JSON")
         raise RentalAssistantError("AI xizmatidan noto'g'ri javob olindi.") from exc
 
     try:
         content = result["choices"][0]["message"]["content"]
         parsed = json.loads(content)
     except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
-        logger.exception("OpenAI rental assistant response did not match the expected schema")
+        logger.exception("Gemini rental assistant response did not match the expected schema")
         raise RentalAssistantError("AI xizmatidan noto'g'ri javob olindi.") from exc
     if not isinstance(parsed, dict):
         raise RentalAssistantError("AI xizmatidan noto'g'ri javob olindi.")
@@ -210,13 +200,15 @@ def find_rentals(message, user=None, language="uz"):
             from .models import ContactMessage
 
             authenticated = bool(getattr(user, "is_authenticated", False))
-            ContactMessage.objects.create(
-                user=user if authenticated else None,
-                name=(user.get_full_name() or user.get_username()) if authenticated else "Sayt foydalanuvchisi",
-                email=(user.email or "") if authenticated else "",
-                subject="AI yordam so'rovi",
-                message=message,
-            )
+            if authenticated:
+                # Signed-in users get the answer in their admin chat, where admins reply.
+                from .chat import post_message, support_conversation_for
+
+                post_message(support_conversation_for(user), user, text=message[:5000])
+            else:
+                ContactMessage.objects.create(
+                    name="Sayt foydalanuvchisi", subject="AI yordam so'rovi", message=message,
+                )
             answer = criteria["support_answer"] or "Savolingiz adminlarga yuborildi."
             answer += " Savolingiz administratorlar navbatiga yuborildi."
         else:

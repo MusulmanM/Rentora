@@ -1,0 +1,17 @@
+{% extends 'core/helper/base.html' %}
+{% load core_tags %}
+{% block helper_title %}Foydalanuvchi chatlari{% endblock %}
+{% block helper_content %}
+<a class="back-link" href="{% url 'helper-chats' %}">← Foydalanuvchi chatlari</a>
+<section class="tg-chat helper-chat">
+  <header class="tg-chat-header">
+    <div class="tg-chat-title"><h1>{% localized_title conversation.listing %}</h1><span data-no-translate="true"><a href="{% url 'helper-user-detail' conversation.customer_id %}">{{ conversation.customer.username }}</a> ↔ <a href="{% url 'helper-user-detail' conversation.provider_id %}">{{ conversation.provider.username }}</a></span></div>
+    <a class="tg-header-link" href="{% url 'listing-detail' conversation.listing.slug %}">E'lonni ko'rish ↗</a>
+  </header>
+  <div class="tg-messages">
+    {% include 'core/partials/chat_messages.html' with show_senders=True %}
+    {% if not chat_messages %}<p class="tg-empty">Xabarlar yo'q.</p>{% endif %}
+  </div>
+  <p class="helper-readonly">Faqat ko'rish rejimi: admin bu suhbatga yozmaydi va xabarlar o'qilgan deb belgilanmaydi.</p>
+</section>
+{% endblock %}

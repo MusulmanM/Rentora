@@ -1,0 +1,13 @@
+{% for message in chat_messages %}
+{% ifchanged message.date %}<div class="tg-date"><span>{{ message.date }}</span></div>{% endifchanged %}
+<article class="tg-msg{% if message.mine %} is-mine{% endif %}{% if message.is_ai %} is-ai{% endif %}" data-message-id="{{ message.id }}" data-no-translate="true">
+  {% if show_senders or not message.mine %}<span class="tg-sender">{{ message.sender }}{% if message.is_ai and request.user.is_staff %} · AI{% endif %}</span>{% endif %}
+  {% if message.attachment_url %}
+    {% if message.attachment_type == 'image' %}<a class="tg-media" href="{{ message.attachment_url }}" target="_blank" rel="noopener"><img src="{{ message.attachment_url }}" alt="Chat rasmi" loading="lazy"></a>
+    {% elif message.attachment_type == 'video' %}<video class="tg-media" controls preload="metadata" src="{{ message.attachment_url }}"></video>
+    {% else %}<audio controls preload="metadata" src="{{ message.attachment_url }}"></audio>{% endif %}
+  {% endif %}
+  {% if message.text %}<p class="tg-text">{{ message.text|linebreaksbr }}</p>{% endif %}
+  <span class="tg-meta"><time>{{ message.time }}</time>{% if message.mine %}<span class="tg-ticks{% if message.read %} is-read{% endif %}" aria-label="{% if message.read %}O'qildi{% else %}Yuborildi{% endif %}">{% if message.read %}✓✓{% else %}✓{% endif %}</span>{% endif %}</span>
+</article>
+{% endfor %}
