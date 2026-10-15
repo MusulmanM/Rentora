@@ -175,7 +175,7 @@ SECURE_REFERRER_POLICY = "same-origin"
 SESSION_COOKIE_HTTPONLY = True
 
 LOGIN_URL = "login"
-LOGIN_REDIRECT_URL = "my-bookings"
+LOGIN_REDIRECT_URL = "home"
 LOGOUT_REDIRECT_URL = "home"
 
 # Session-authenticated JSON API; Django's CSRF middleware remains enabled.

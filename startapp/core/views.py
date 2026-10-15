@@ -173,7 +173,7 @@ class StartAppLoginView(LoginView):
 @rate_limited("register", limit=10, window=3600)
 def register(request):
     if request.user.is_authenticated:
-        return redirect("my-bookings")
+        return redirect("home")
     if request.method == "POST":
         form = RegistrationForm(request.POST)
         if form.is_valid():

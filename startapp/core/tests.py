@@ -1727,3 +1727,11 @@ class DjangoAdminHardeningTests(TestCase):
         self.assertContains(response, "Rentora — bosh admin")
         self.assertIn("no-store", response["Cache-Control"])
         self.assertIn("noindex", response["X-Robots-Tag"])
+
+
+class SignInRedirectTests(TestCase):
+    def test_login_and_signed_in_register_open_home_page(self):
+        get_user_model().objects.create_user("walker", password="SafePass123!")
+        response = self.client.post(reverse("login"), {"username": "walker", "password": "SafePass123!"})
+        self.assertRedirects(response, reverse("home"), fetch_redirect_response=False)
+        self.assertRedirects(self.client.get(reverse("register")), reverse("home"), fetch_redirect_response=False)
