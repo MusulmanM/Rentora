@@ -204,16 +204,19 @@ def find_rentals(message, user=None, language="uz"):
                 # Signed-in users get the answer in their admin chat, where admins reply.
                 from .chat import post_message, support_conversation_for
 
-                post_message(support_conversation_for(user), user, text=message[:5000])
+                conversation = support_conversation_for(user)
+                post_message(conversation, user, text=message[:5000])
+                chat_url = reverse("chat-room", args=[conversation.pk])
             else:
                 ContactMessage.objects.create(
                     name="Sayt foydalanuvchisi", subject="AI yordam so'rovi", message=message,
                 )
+                chat_url = reverse("guest-support")
             answer = criteria["support_answer"] or "Savolingiz adminlarga yuborildi."
             answer += " Savolingiz administratorlar navbatiga yuborildi."
-        else:
-            answer = criteria["support_answer"] or "Rentora bo'yicha yordam so'rovingizni aniqlay olmadim."
-        return {"message": answer, "results": [], "escalated": criteria["escalate"]}
+            return {"message": answer, "results": [], "escalated": True, "chat_url": chat_url}
+        answer = criteria["support_answer"] or "Rentora bo'yicha yordam so'rovingizni aniqlay olmadim."
+        return {"message": answer, "results": [], "escalated": False}
 
     listings = listings_visible_to(
         user,

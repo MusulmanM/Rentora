@@ -10,3 +10,12 @@ def create_user_account(sender, instance, created, **kwargs):
         from .models import UserAccount
 
         UserAccount.objects.get_or_create(user=instance)
+
+
+@receiver(post_save, sender="core.ListingImage")
+def make_listing_thumbnail(sender, instance, created, **kwargs):
+    """A light WebP copy for listing cards (see core/thumbnails.py)."""
+    if instance.image:
+        from .thumbnails import make_thumbnail
+
+        make_thumbnail(instance.image)

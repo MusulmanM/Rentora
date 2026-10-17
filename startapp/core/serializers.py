@@ -3,6 +3,7 @@ from django.db import transaction
 from rest_framework import serializers
 
 from .models import Booking, BookingOrder, RentalListing
+from .payments import available_payment_methods
 
 
 class ListingSerializer(serializers.ModelSerializer):
@@ -67,6 +68,11 @@ class BookingSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"guests": "Kamida 1 kishi bo'lishi kerak."})
         if guests > listing.capacity:
             raise serializers.ValidationError({"guests": f"Eng ko'p sig'im: {listing.capacity}."})
+        payment_method = attrs.get("payment_method", Booking.PaymentMethod.CASH)
+        if payment_method not in available_payment_methods(listing):
+            raise serializers.ValidationError({
+                "payment_method": "Bu ijara beruvchi tanlangan to'lov turini qabul qilmaydi.",
+            })
         conflicts = Booking.objects.filter(
             listing=listing,
             status__in=[

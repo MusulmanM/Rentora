@@ -176,6 +176,16 @@
       loadingTurn.remove();
       addTurn("assistant", reply);
       appendResults(data.results);
+      const chatUrl = safeUrl(data.chat_url);
+      if (chatUrl) {
+        // Escalated: take the user straight to the admin chat where the team answers.
+        const link = document.createElement("a");
+        link.className = "ai-admin-chat-link";
+        link.href = chatUrl;
+        link.textContent = "Admin chatini ochish →";
+        conversation.append(link);
+        scrollToLatest();
+      }
     } catch (error) {
       loadingTurn.remove();
       addTurn("assistant", error.message || "Ulanishda xatolik yuz berdi.", { error: true });

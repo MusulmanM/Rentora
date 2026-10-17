@@ -3,7 +3,8 @@
 #   cp .env.example .env      # fill in secrets and the public address
 #   docker compose up -d --build
 #
-# The site listens on RENTORA_PORT (default 8090).
+# The site listens on 127.0.0.1:RENTORA_PORT (default 8090): put a tunnel (cloudflared) or a reverse
+# proxy in front of it. Data (SQLite, uploads, chat media) lives in RENTORA_DATA (a folder or a volume).
 # With a domain pointed at the server, add HTTPS (free Let's Encrypt certificate via Caddy):
 #   DOMAIN=rentora.uz docker compose --profile https up -d
 name: rentora
@@ -12,7 +13,7 @@ x-app: &app
   image: rentora:latest
   env_file: .env
   volumes:
-    - rentora-data:/data
+    - ${RENTORA_DATA:-rentora-data}:/data
   restart: unless-stopped
 
 services:
@@ -20,13 +21,15 @@ services:
     <<: *app
     build: .
     ports:
-      - "${RENTORA_PORT:-8090}:8000"
+      - "127.0.0.1:${RENTORA_PORT:-8090}:8000"
 
   bot:
     <<: *app
     environment:
       RUN_MIGRATIONS: "0"
     command: ["python", "manage.py", "run_telegram_bot"]
+    healthcheck:
+      disable: true  # no web server in this container
     depends_on:
       web:
         condition: service_healthy
@@ -36,6 +39,20 @@ services:
     environment:
       RUN_MIGRATIONS: "0"
     command: ["python", "manage.py", "run_support_ai"]
+    healthcheck:
+      disable: true  # no web server in this container
+    depends_on:
+      web:
+        condition: service_healthy
+
+  reminders:
+    <<: *app
+    environment:
+      RUN_MIGRATIONS: "0"
+    # Rental-end and late-return Telegram reminders, checked every hour.
+    command: ["python", "manage.py", "send_rental_reminders", "--every", "3600"]
+    healthcheck:
+      disable: true  # no web server in this container
     depends_on:
       web:
         condition: service_healthy

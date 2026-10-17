@@ -99,3 +99,7 @@ small.helper-muted{display:block}
   .helper-facts-grid{grid-template-columns:1fr}
   .helper-profile{flex-direction:column}
 }
+
+.guest-badge{display:inline-block;margin-left:6px;padding:2px 8px;border-radius:999px;background:#fdf3d8;color:#8a6410;font-size:11px;font-weight:700;vertical-align:middle}
+
+.helper-actions-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}

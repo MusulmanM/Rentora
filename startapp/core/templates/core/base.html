@@ -3,13 +3,18 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f7f7f4">
-  <meta name="description" content="Rentora — O'zbekistonda uy va avtomobilni oson toping va bron qiling.">
+  <meta name="description" content="{% block meta_description %}Rentora — O'zbekistonda uy va avtomobilni oson toping va bron qiling.{% endblock %}">
+  {% block seo %}{% include 'core/partials/seo_meta.html' %}{% endblock %}
   <title>{% block title %}Rentora — turar joy va avtomobil ijarasi{% endblock %}</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{% static 'core/app.css' %}?v=20261014-v3">
-  <link rel="stylesheet" href="{% static 'core/account.css' %}?v=20261014-v2">
-  <link rel="stylesheet" href="{% static 'core/ai-assistant.css' %}?v=20261014-v2">
+  <link rel="icon" type="image/png" sizes="32x32" href="{% static 'core/favicon-32.png' %}">
+  <link rel="icon" type="image/png" sizes="192x192" href="{% static 'core/icon-192.png' %}">
+  <link rel="apple-touch-icon" href="{% static 'core/apple-touch-icon.png' %}">
+  <link rel="preload" href="{% static 'core/fonts/dm-sans-latin.woff2' %}" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="{% static 'core/fonts/manrope-latin.woff2' %}" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="{% static 'core/fonts/fonts.css' %}">
+  <link rel="stylesheet" href="{% static 'core/app.css' %}?v=20261018-v2">
+  <link rel="stylesheet" href="{% static 'core/account.css' %}?v=20261017-v2">
+  <link rel="stylesheet" href="{% static 'core/ai-assistant.css' %}?v=20261017-v1">
   {% block extra_head %}{% endblock %}
 </head>
 <body class="{% block body_class %}{% endblock %}">
@@ -44,6 +49,7 @@
         <button type="submit" aria-label="Xabarni yuborish" data-ai-send><span aria-hidden="true">↑</span></button>
       </form>
       <p class="ai-chat-scope">Ijara qidiruvi, saralash, narx hisob-kitobi va Rentora yordami.</p>
+      <a class="ai-admin-chat-link" href="{% url 'guest-support' %}">💬 Admin bilan yozishish</a>
       {% else %}
       <div class="ai-chat-disabled" data-ai-disabled>
         <span class="ai-disabled-icon" aria-hidden="true">⚙</span>
@@ -54,9 +60,9 @@
     </section>
   </div>
   {% endblock %}
-  <script src="{% static 'core/i18n.js' %}?v=20261014-v2" defer></script>
-  <script src="{% static 'core/app.js' %}?v=20261014-v3" defer></script>
-  <script src="{% static 'core/ai-assistant.js' %}?v=20261014-v2" defer></script>
+  <script src="{% static 'core/i18n.js' %}?v=20261018-v1" defer></script>
+  <script src="{% static 'core/app.js' %}?v=20261018-v2" defer></script>
+  <script src="{% static 'core/ai-assistant.js' %}?v=20261016-v1" defer></script>
   <script src="{% static 'core/chat-unread.js' %}?v=20261014-v2" defer></script>
   {% block scripts %}{% endblock %}
 </body>

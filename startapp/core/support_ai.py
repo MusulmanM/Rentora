@@ -40,6 +40,17 @@ Strict rules:
 - Do not invent listings, prices or policies; use the tools.
 Today is {today}."""
 
+GUEST_PROMPT = """
+This person has NO Rentora account yet (or cannot sign in): they write from the login / sign-up page.
+Help them step by step:
+- Sign up: open the Telegram bot {bot}, press Start and share the phone number with the button; then open
+  {site}/accounts/register/, enter a username, the same phone number and a password, and type the 6-digit code
+  the bot sends (it is valid for 10 minutes; a new code can be requested after 60 seconds).
+- "Phone already registered": they probably have an account; offer to sign in at {site}/accounts/login/.
+- Blocked account, forgotten password or wrong phone: you cannot unblock accounts or reset passwords. Ask for the
+  username (never the password), call escalate_to_admin and say an admin will check and reply here.
+They have no bookings, so do not look for any."""
+
 
 def _public_listing(listing):
     host = HostProfile.objects.filter(user_id=listing.owner_id).first() if listing.owner_id else None
@@ -150,14 +161,23 @@ def _history(conversation, limit=20):
     return history
 
 
+def is_guest(user):
+    account = getattr(user, "account", None)
+    return bool(account and account.is_guest)
+
+
 def answer_conversation(conversation):
     """Write one AI reply in a support chat. Returns the created message."""
     state = {"escalated": False}
-    reply = run_agent(
-        SYSTEM_PROMPT.format(today=timezone.localdate().isoformat()),
-        _history(conversation),
-        build_tools(conversation.customer, state),
-    )
+    prompt = SYSTEM_PROMPT.format(today=timezone.localdate().isoformat())
+    tools = build_tools(conversation.customer, state)
+    if is_guest(conversation.customer):
+        bot = getattr(settings, "TELEGRAM_BOT_USERNAME", "")
+        prompt += GUEST_PROMPT.format(
+            bot=f"@{bot}" if bot else "Rentora", site=getattr(settings, "PUBLIC_SITE_URL", "") or "",
+        )
+        tools = [tool for tool in tools if tool.name != "my_bookings"]
+    reply = run_agent(prompt, _history(conversation), tools)
     if not reply:
         raise AgentError("AI bo'sh javob qaytardi.")
     message = post_message(conversation, None, text=reply[:5000], is_ai=True)

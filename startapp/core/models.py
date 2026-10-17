@@ -1,4 +1,5 @@
 from decimal import Decimal
+import secrets
 import uuid
 
 from django.conf import settings
@@ -70,6 +71,32 @@ class TelegramAccount(models.Model):
         return self.phone_number
 
 
+
+class TelegramChatLanguage(models.Model):
+    """The language a Telegram chat chose in the Rentora bot (also before a phone is linked)."""
+
+    class Language(models.TextChoices):
+        UZ = "uz", "O'zbekcha"
+        RU = "ru", "Русский"
+        EN = "en", "English"
+
+    chat_id = models.CharField(max_length=32, unique=True)
+    language = models.CharField(max_length=2, choices=Language.choices, default=Language.UZ)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Telegram tili"
+        verbose_name_plural = "Telegram tillari"
+
+    def __str__(self):
+        return f"{self.chat_id} — {self.language}"
+
+
+def chat_language(chat_id):
+    """The bot language of a chat; Uzbek until the user picks one."""
+    row = TelegramChatLanguage.objects.filter(chat_id=str(chat_id)).values_list("language", flat=True).first()
+    return row or TelegramChatLanguage.Language.UZ
+
 class UserProfile(models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="profile")
     phone_number = models.CharField(max_length=16, unique=True)
@@ -118,6 +145,10 @@ class UserAccount(models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="account")
     uid = models.UUIDField("UID", default=uuid.uuid4, unique=True, editable=False)
     avatar = models.ImageField("Rasm", upload_to=randomized_upload_path("avatars"), blank=True)
+    # A visitor without an account who writes to the admin team from the login / sign-up pages.
+    # Guests are inactive users: they can never sign in, they only own their support chat.
+    is_guest = models.BooleanField("Mehmon", default=False)
+    guest_phone = models.CharField("Mehmon telefoni", max_length=16, blank=True)
 
     class Meta:
         verbose_name = "Foydalanuvchi hisobi"
@@ -149,6 +180,64 @@ class HostProfile(models.Model):
 
     def __str__(self):
         return self.display_name
+
+
+def _callback_token():
+    """Used by migration 0018 (per-provider merchants, since replaced by payout cards)."""
+    return secrets.token_urlsafe(24)
+
+
+class ProviderPaymentAccount(models.Model):
+    """Where a provider receives money: just their own bank card (Uzcard / Humo).
+
+    Customers pay Rentora's single Click / Payme merchant; after the hand-over Rentora pays the provider
+    (minus commission) to this card. The card number is stored encrypted (core.secret_box) and is shown
+    masked everywhere except to the head admin who sends the payout. A new card takes effect only after
+    the head admin approves it, so a hijacked account cannot silently redirect payouts.
+    """
+
+    class CardBrand(models.TextChoices):
+        UZCARD = "uzcard", "Uzcard"
+        HUMO = "humo", "Humo"
+
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="payment_account")
+    card_number_encrypted = models.TextField(blank=True, editable=False)
+    card_last4 = models.CharField("Karta (oxirgi 4 raqam)", max_length=4, blank=True)
+    card_brand = models.CharField("Karta turi", max_length=10, choices=CardBrand.choices, blank=True)
+    card_holder = models.CharField("Karta egasi", max_length=80, blank=True)
+    offer_accepted_at = models.DateTimeField("Oferta qabul qilingan", null=True, blank=True)
+    approved = models.BooleanField("Bosh admin tasdiqlagan", default=False)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "To'lov kartasi (ijara beruvchi)"
+        verbose_name_plural = "To'lov kartalari (ijara beruvchilar)"
+
+    def __str__(self):
+        return f"{self.user.get_username()} — {self.masked_card or 'karta yo‘q'}"
+
+    @property
+    def card_number(self):
+        from .secret_box import decrypt
+        return decrypt(self.card_number_encrypted)
+
+    @card_number.setter
+    def card_number(self, value):
+        from .secret_box import encrypt
+        self.card_number_encrypted = encrypt(value)
+        self.card_last4 = value[-4:] if value else ""
+
+    @property
+    def masked_card(self):
+        return f"•••• •••• •••• {self.card_last4}" if self.card_last4 else ""
+
+    @property
+    def has_card(self):
+        return bool(self.card_number_encrypted and self.card_last4)
+
+    @property
+    def can_receive_payouts(self):
+        return self.approved and self.has_card and self.offer_accepted_at is not None
 
 
 class ContactMessage(models.Model):
@@ -207,6 +296,8 @@ class RentalListing(models.Model):
     description_ru = models.TextField("Описание (RU)", blank=True)
     description_en = models.TextField("Description (EN)", blank=True)
     price_per_day = models.DecimalField("Kunlik narx (so'm)", max_digits=12, decimal_places=2)
+    # Homes can also be rented by the month; empty means daily rental only.
+    price_per_month = models.DecimalField("Oylik narx (so'm)", max_digits=14, decimal_places=2, null=True, blank=True)
     legacy_image_url = models.URLField("Eski rasm URL", max_length=600, blank=True, db_column="image_url")
     capacity = models.PositiveSmallIntegerField("Sig'im", default=2, help_text="Uy uchun mehmonlar, mashina uchun o'rindiqlar.")
     bedrooms = models.PositiveSmallIntegerField("Yotoq xonalari", blank=True, null=True)
@@ -266,6 +357,14 @@ class RentalListing(models.Model):
     def image_url(self):
         return self.primary_image_url
 
+    @property
+    def card_image_url(self):
+        """A light WebP thumbnail for listing cards; the full photo if no thumbnail exists yet."""
+        from .thumbnails import thumbnail_url
+
+        image = next(iter(self.images.all()), None)
+        return thumbnail_url(image.image) if image else self.legacy_image_url
+
     def __str__(self):
         return f"{self.title} — {self.city}"
 
@@ -310,13 +409,22 @@ class Booking(models.Model):
         PENDING = "pending", "Kutilmoqda"
         CONFIRMED = "confirmed", "Tasdiqlangan"
         HANDED_OVER = "handed_over", "Mijozga topshirilgan"
+        RETURNED = "returned", "Qaytarilgan"
         CANCELLED = "cancelled", "Bekor qilingan"
 
     class PaymentMethod(models.TextChoices):
         CASH = "cash", "Naqd"
-        CARD = "card", "Karta"
         CLICK = "click", "Click"
         PAYME = "payme", "Payme"
+
+    class RentalUnit(models.TextChoices):
+        DAY = "day", "Kunlik"
+        MONTH = "month", "Oylik"
+
+    class PaymentPlan(models.TextChoices):
+        FULL = "full", "To'liq"
+        MONTHLY = "monthly", "Har oy"
+        BIWEEKLY = "biweekly", "Har 15 kunda"
 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="bookings", verbose_name="Foydalanuvchi")
     listing = models.ForeignKey(RentalListing, on_delete=models.PROTECT, related_name="bookings", verbose_name="E'lon")
@@ -324,9 +432,20 @@ class Booking(models.Model):
     check_out = models.DateField("Tugash sanasi")
     guests = models.PositiveSmallIntegerField("Mehmonlar / yo'lovchilar", default=1)
     payment_method = models.CharField("To'lov turi", max_length=20, choices=PaymentMethod.choices, default=PaymentMethod.CASH)
+    rental_unit = models.CharField("Ijara turi", max_length=5, choices=RentalUnit.choices, default=RentalUnit.DAY)
+    months = models.PositiveSmallIntegerField("Oylar soni", null=True, blank=True)
+    payment_plan = models.CharField("To'lov rejasi", max_length=8, choices=PaymentPlan.choices, default=PaymentPlan.FULL)
     total_price = models.DecimalField("Jami narx (so'm)", max_digits=14, decimal_places=2, default=Decimal("0.00"))
     status = models.CharField("Holati", max_length=12, choices=Status.choices, default=Status.PENDING)
     requested_at = models.DateTimeField("Bron so'rovi vaqti", default=timezone.now)
+    handed_over_at = models.DateTimeField("Topshirilgan vaqt", null=True, blank=True)
+    returned_at = models.DateTimeField("Qaytarilgan vaqt", null=True, blank=True)
+    # Late return: every day past check_out costs one more day of rent, paid when the item comes back.
+    overdue_days = models.PositiveIntegerField("Kechikkan kunlar", default=0)
+    debt_amount = models.DecimalField("Kechikish qarzi (so'm)", max_digits=14, decimal_places=2, default=Decimal("0.00"))
+    debt_paid_at = models.DateTimeField("Qarz to'langan vaqt", null=True, blank=True)
+    end_notice_sent_on = models.DateField(null=True, blank=True, editable=False)
+    overdue_notice_sent_on = models.DateField(null=True, blank=True, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -340,6 +459,26 @@ class Booking(models.Model):
     def days(self):
         return max((self.check_out - self.check_in).days, 0)
 
+    @property
+    def daily_rate(self):
+        """The agreed price of one day (the listing price may change later)."""
+        if self.days and self.total_price:
+            return (self.total_price / self.days).quantize(Decimal("0.01"))
+        return self.listing.price_per_day
+
+    def late_days(self, on=None):
+        """Days past check_out while the item is still with the customer."""
+        if self.status != self.Status.HANDED_OVER:
+            return 0
+        return max(((on or timezone.localdate()) - self.check_out).days, 0)
+
+    def current_debt(self, on=None):
+        return self.daily_rate * self.late_days(on)
+
+    @property
+    def is_overdue(self):
+        return self.late_days() > 0
+
     def clean(self):
         errors = {}
         if self.listing_id and self.user_id and self.listing.owner_id == self.user_id:
@@ -347,7 +486,7 @@ class Booking(models.Model):
         if (
             self.listing_id
             and self.listing.availability_status != RentalListing.AvailabilityStatus.ACTIVE
-            and self.status != self.Status.CANCELLED
+            and self.status not in (self.Status.CANCELLED, self.Status.RETURNED)
         ):
             errors["listing"] = "Bu e'lon hozir remontda."
         if self.check_in and self.check_out:
@@ -371,6 +510,8 @@ class Booking(models.Model):
                 conflicts = conflicts.exclude(pk=self.pk)
             if conflicts.exists():
                 errors["check_in"] = "Bu sanalarda e'lon band. Boshqa sanalarni tanlang."
+            if not self.pk and unreturned_rentals(self.listing_id).exists():
+                errors["check_in"] = "Bu mahsulot oldingi mijozdan hali qaytarilmagan."
             if BookingOrder.objects.filter(
                 listing_id=self.listing_id,
                 status__in=[BookingOrder.Status.PENDING, BookingOrder.Status.AWAITING_PAYMENT],
@@ -383,11 +524,28 @@ class Booking(models.Model):
 
     def save(self, *args, **kwargs):
         if not self.pk and not self.total_price and self.listing_id and self.check_in and self.check_out and self.check_out > self.check_in:
-            self.total_price = self.listing.price_per_day * (self.check_out - self.check_in).days
+            from .installments import rental_total
+
+            self.total_price = rental_total(self.listing, self.check_in, self.check_out, self.rental_unit, self.months)
         super().save(*args, **kwargs)
+
+    @property
+    def is_monthly(self):
+        return self.rental_unit == self.RentalUnit.MONTH
+
+    @property
+    def has_installments(self):
+        return self.payment_plan != self.PaymentPlan.FULL
 
     def __str__(self):
         return f"Bron #{self.pk or 'yangi'} — {self.listing.title}"
+
+
+def unreturned_rentals(listing_id):
+    """Rentals whose end date has passed but whose item was not brought back yet."""
+    return Booking.objects.filter(
+        listing_id=listing_id, status=Booking.Status.HANDED_OVER, check_out__lte=timezone.localdate(),
+    )
 
 
 class BookingOrder(models.Model):
@@ -405,7 +563,12 @@ class BookingOrder(models.Model):
     check_out = models.DateField("Tugash sanasi")
     guests = models.PositiveSmallIntegerField("Mehmonlar / yo'lovchilar", default=1)
     payment_method = models.CharField("To'lov turi", max_length=20, choices=Booking.PaymentMethod.choices)
+    rental_unit = models.CharField("Ijara turi", max_length=5, choices=Booking.RentalUnit.choices, default=Booking.RentalUnit.DAY)
+    months = models.PositiveSmallIntegerField("Oylar soni", null=True, blank=True)
+    payment_plan = models.CharField("To'lov rejasi", max_length=8, choices=Booking.PaymentPlan.choices, default=Booking.PaymentPlan.FULL)
     total_price = models.DecimalField("Jami narx (so'm)", max_digits=14, decimal_places=2, default=Decimal("0.00"))
+    # Paid online now: the whole rent, or the first part of an instalment plan.
+    first_amount = models.DecimalField("Hozir to'lanadi (so'm)", max_digits=14, decimal_places=2, default=Decimal("0.00"))
     status = models.CharField("Holati", max_length=20, choices=Status.choices, default=Status.AWAITING_PAYMENT)
     booking = models.OneToOneField(Booking, on_delete=models.SET_NULL, related_name="paid_order", null=True, blank=True, verbose_name="Yaratilgan bron")
     created_at = models.DateTimeField(auto_now_add=True)
@@ -451,6 +614,8 @@ class BookingOrder(models.Model):
             )
             if conflicts.exists():
                 errors["check_in"] = "Bu sanalarda e'lon band. Boshqa sanalarni tanlang."
+            if not self.pk and unreturned_rentals(self.listing_id).exists():
+                errors["check_in"] = "Bu mahsulot oldingi mijozdan hali qaytarilmagan."
             orders = BookingOrder.objects.filter(
                 listing_id=self.listing_id,
                 status__in=[self.Status.PENDING, self.Status.AWAITING_PAYMENT],
@@ -466,11 +631,51 @@ class BookingOrder(models.Model):
 
     def save(self, *args, **kwargs):
         if not self.pk and self.listing_id and self.check_in and self.check_out and self.check_out > self.check_in:
-            self.total_price = self.listing.price_per_day * (self.check_out - self.check_in).days
+            from .installments import rental_total, schedule
+
+            self.total_price = rental_total(self.listing, self.check_in, self.check_out, self.rental_unit, self.months)
+            self.first_amount = schedule(self.total_price, self.check_in, self.check_out, self.payment_plan, self.months)[0][1]
         super().save(*args, **kwargs)
+
+    @property
+    def payable_amount(self):
+        return self.first_amount or self.total_price
 
     def __str__(self):
         return f"Buyurtma {self.reference} — {self.listing.title}"
+
+
+class Installment(models.Model):
+    """One part of a monthly rental paid in instalments (every month or every 15 days)."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "To'lanmagan"
+        PAID = "paid", "To'langan"
+
+    booking = models.ForeignKey(Booking, on_delete=models.CASCADE, related_name="installments", verbose_name="Bron")
+    number = models.PositiveSmallIntegerField("Tartib raqami")
+    due_date = models.DateField("To'lov sanasi")
+    amount = models.DecimalField("Summa (so'm)", max_digits=14, decimal_places=2)
+    status = models.CharField("Holati", max_length=8, choices=Status.choices, default=Status.PENDING)
+    method = models.CharField("Qanday to'landi", max_length=20, choices=Booking.PaymentMethod.choices, blank=True)
+    paid_at = models.DateTimeField("To'langan vaqt", null=True, blank=True)
+    # Click / Payme order id for paying this part online.
+    reference = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    reminded_on = models.DateField(null=True, blank=True, editable=False)
+
+    class Meta:
+        ordering = ["booking", "number"]
+        verbose_name = "To'lov bo'lagi"
+        verbose_name_plural = "To'lov bo'laklari"
+        constraints = [models.UniqueConstraint(fields=["booking", "number"], name="core_installment_booking_number_uniq")]
+        indexes = [models.Index(fields=["status", "due_date"], name="core_installment_due_idx")]
+
+    @property
+    def is_overdue(self):
+        return self.status == self.Status.PENDING and self.due_date < timezone.localdate()
+
+    def __str__(self):
+        return f"#{self.booking_id} — {self.number}-to'lov, {self.amount} so'm"
 
 
 class PaymentTransaction(models.Model):
@@ -478,7 +683,8 @@ class PaymentTransaction(models.Model):
         CLICK = "click", "Click"
         PAYME = "payme", "Payme"
 
-    booking_order = models.ForeignKey(BookingOrder, on_delete=models.PROTECT, related_name="payments")
+    booking_order = models.ForeignKey(BookingOrder, on_delete=models.PROTECT, related_name="payments", null=True, blank=True)
+    installment = models.ForeignKey("Installment", on_delete=models.PROTECT, related_name="payments", null=True, blank=True)
     provider = models.CharField(max_length=10, choices=Provider.choices)
     provider_transaction_id = models.CharField(max_length=100, unique=True)
     amount = models.DecimalField(max_digits=14, decimal_places=2)
@@ -486,6 +692,7 @@ class PaymentTransaction(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     performed_at = models.DateTimeField(null=True, blank=True)
     cancelled_at = models.DateTimeField(null=True, blank=True)
+    cancel_reason = models.SmallIntegerField(null=True, blank=True)
 
     class Meta:
         verbose_name = "To'lov tranzaksiyasi"
@@ -493,6 +700,48 @@ class PaymentTransaction(models.Model):
 
     def __str__(self):
         return f"{self.provider} — {self.provider_transaction_id}"
+
+
+class Payout(models.Model):
+    """Money Rentora owes a provider for one online-paid booking, or owes back to the customer.
+
+    held     — paid online, the item is not handed over yet;
+    ready    — handed over: send `net_amount` to the provider's card;
+    paid     — sent to the provider;
+    refund   — cancelled before the hand-over: return `gross_amount` to the customer;
+    refunded — returned to the customer.
+    """
+
+    class Status(models.TextChoices):
+        HELD = "held", "Ushlab turilibdi"
+        READY = "ready", "Ijara beruvchiga o'tkazish kerak"
+        PAID = "paid", "Ijara beruvchiga o'tkazildi"
+        REFUND = "refund", "Mijozga qaytarish kerak"
+        REFUNDED = "refunded", "Mijozga qaytarildi"
+
+    booking = models.ForeignKey("Booking", on_delete=models.PROTECT, related_name="payouts")
+    installment = models.ForeignKey("Installment", on_delete=models.PROTECT, null=True, blank=True, related_name="payouts")
+    provider = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="payouts")
+    payment = models.ForeignKey("PaymentTransaction", on_delete=models.PROTECT, null=True, blank=True, related_name="payouts")
+    gross_amount = models.DecimalField("Mijoz to'lagan", max_digits=14, decimal_places=2)
+    commission_percent = models.DecimalField("Komissiya, %", max_digits=5, decimal_places=2)
+    commission_amount = models.DecimalField("Rentora komissiyasi", max_digits=14, decimal_places=2)
+    net_amount = models.DecimalField("Ijara beruvchiga", max_digits=14, decimal_places=2)
+    status = models.CharField("Holati", max_length=10, choices=Status.choices, default=Status.HELD)
+    card_last4 = models.CharField("Karta", max_length=4, blank=True)
+    reference = models.CharField("O'tkazma raqami / izoh", max_length=120, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    ready_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "To'lov o'tkazmasi"
+        verbose_name_plural = "To'lov o'tkazmalari"
+        indexes = [models.Index(fields=["status", "created_at"], name="core_payout_status_idx")]
+
+    def __str__(self):
+        return f"#{self.booking_id} — {self.net_amount} so'm — {self.get_status_display()}"
 
 
 class Conversation(models.Model):

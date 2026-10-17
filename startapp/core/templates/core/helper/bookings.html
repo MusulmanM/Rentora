@@ -24,8 +24,8 @@
       <td data-no-translate="true"><a href="{% url 'helper-user-detail' booking.user_id %}">{{ booking.user.username }}</a></td>
       <td data-no-translate="true">{% if booking.listing.owner_id %}<a href="{% url 'helper-user-detail' booking.listing.owner_id %}">{{ booking.listing.owner.username }}</a>{% else %}—{% endif %}</td>
       <td>{{ booking.check_in|date:'d.m.Y' }} — {{ booking.check_out|date:'d.m.Y' }}<small class="helper-muted">{{ booking.days }} kun · so'rov {{ booking.requested_at|date:'d.m H:i' }}</small></td>
-      <td>{{ booking.get_payment_method_display }}</td>
-      <td>{{ booking.total_price|money }} so'm</td>
+      <td>{{ booking.get_payment_method_display }}{% if booking.is_monthly %}<small class="helper-muted"><span>Oylik</span> · {{ booking.months }} <span>oy</span></small>{% endif %}</td>
+      <td>{{ booking.total_price|money }} so'm{% include 'core/partials/installments.html' with booking=booking role='admin' %}</td>
       <td><span class="booking-status status-{{ booking.status }}">{{ booking.get_status_display }}</span></td>
       <td>{% if booking.status == 'pending' or booking.status == 'confirmed' %}<form method="post" action="{% url 'helper-booking-cancel' booking.pk %}" data-confirm="Bronni bekor qilasizmi? Ikkala tomonga Telegram xabari boradi.">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}"><button class="btn btn-danger-outline btn-small" type="submit">Bekor qilish</button></form>{% endif %}</td>
     </tr>

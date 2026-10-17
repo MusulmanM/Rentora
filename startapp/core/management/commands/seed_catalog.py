@@ -1,11 +1,15 @@
 """Fill the catalog with realistic homes and cars (uz/ru/en) for one provider.
 
     python manage.py seed_catalog --owner mmmm --count 150 --photos /path/to/photos [--wipe]
+    python manage.py seed_catalog --owner mmmm --kind home --count 75 --photos /path/to/photos --replace
 
 `--photos` must contain `home/` and `car/` folders with .jpg files. Car photos are matched to the
 car model they show (see CAR_MODELS), so a listing is always titled after the car in its photo.
 `--wipe` first deletes all listings, bookings, orders, payments, chats, reviews and contact
 messages, keeping only user data (accounts, profiles, Telegram links, company profiles).
+`--kind home|car` creates only that kind; with `--replace` the owner's listings of that kind are
+deleted first, together with their bookings, orders, payments, chats and reviews.
+Most new homes also get a monthly price (about 22 daily prices), so they can be rented by the month.
 """
 import random
 from decimal import Decimal
@@ -18,7 +22,7 @@ from django.db import transaction
 
 from core.models import (
     Booking, BookingOrder, ChatMessage, ContactMessage, Conversation, District, HostProfile, ListingImage,
-    ListingReview, PaymentTransaction, PendingPhoneVerification, PendingRegistration, RentalListing,
+    ListingReview, PaymentTransaction, Payout, PendingPhoneVerification, PendingRegistration, RentalListing,
 )
 
 User = get_user_model()
@@ -117,6 +121,8 @@ class Command(BaseCommand):
         parser.add_argument("--photos", required=True, help="Folder with home/ and car/ photo subfolders.")
         parser.add_argument("--wipe", action="store_true", help="Delete all listings, bookings, chats and reviews first.")
         parser.add_argument("--seed", type=int, default=2026)
+        parser.add_argument("--kind", choices=("both", "home", "car"), default="both", help="Which listings to create.")
+        parser.add_argument("--replace", action="store_true", help="Delete the owner's listings of --kind first.")
 
     def handle(self, *args, **options):
         owner = User.objects.filter(username=options["owner"]).first()
@@ -127,17 +133,26 @@ class Command(BaseCommand):
         photos = Path(options["photos"])
         home_photos = sorted((photos / "home").glob("*.jpg"))
         car_photos = {path.stem: path for path in (photos / "car").glob("*.jpg")}
-        if not home_photos or not car_photos:
+        if (options["kind"] != "car" and not home_photos) or (options["kind"] != "home" and not car_photos):
             raise CommandError("home/ yoki car/ papkasida rasm yo'q.")
         rng = random.Random(options["seed"])
 
         if options["wipe"]:
             self._wipe()
+        if options["replace"]:
+            if options["kind"] == "both":
+                raise CommandError("--replace uchun --kind home yoki --kind car ni ko'rsating.")
+            self._delete_kind(owner, options["kind"])
 
         districts = list(District.objects.filter(code__in=LOCATIONS).select_related("region"))
         weights = [LOCATIONS[district.code] for district in districts]
-        home_total = options["count"] // 2
-        car_total = options["count"] - home_total
+        if options["kind"] == "home":
+            home_total, car_total = options["count"], 0
+        elif options["kind"] == "car":
+            home_total, car_total = 0, options["count"]
+        else:
+            home_total = options["count"] // 2
+            car_total = options["count"] - home_total
         created = 0
         with transaction.atomic():
             for index in range(home_total):
@@ -160,6 +175,29 @@ class Command(BaseCommand):
         for model in (PaymentTransaction, BookingOrder, Booking, ChatMessage, Conversation, ListingReview,
                       ListingImage, RentalListing, ContactMessage, PendingRegistration, PendingPhoneVerification):
             deleted[model.__name__], _ = model.objects.all().delete()
+        self.stdout.write("O'chirildi: " + ", ".join(f"{name}={count}" for name, count in deleted.items()))
+
+    def _delete_kind(self, owner, kind):
+        """Remove one provider's listings of one kind and everything that hangs off them."""
+        listings = RentalListing.objects.filter(owner=owner, kind=kind)
+        bookings = Booking.objects.filter(listing__in=listings)
+        orders = BookingOrder.objects.filter(listing__in=listings)
+        conversations = Conversation.objects.filter(listing__in=listings)
+        for message in ChatMessage.objects.filter(conversation__in=conversations).exclude(attachment=""):
+            message.attachment.delete(save=False)
+        for image in ListingImage.objects.filter(listing__in=listings):
+            image.image.delete(save=False)
+        deleted = {}
+        with transaction.atomic():
+            for name, queryset in (
+                ("Payout", Payout.objects.filter(booking__in=bookings)),
+                ("PaymentTransaction", PaymentTransaction.objects.filter(booking_order__in=orders)),
+                ("PaymentTransaction (instalments)", PaymentTransaction.objects.filter(installment__booking__in=bookings)),
+                ("BookingOrder", orders), ("Booking", bookings), ("Conversation", conversations),
+                ("ListingReview", ListingReview.objects.filter(listing__in=listings)),
+                ("RentalListing", listings),
+            ):
+                deleted[name], _ = queryset.delete()
         self.stdout.write("O'chirildi: " + ", ".join(f"{name}={count}" for name, count in deleted.items()))
 
     def _address(self, rng):
@@ -256,6 +294,8 @@ class Command(BaseCommand):
             title=title[0], title_ru=title[1], title_en=title[2],
             description=body[0], description_ru=body[1], description_en=body[2],
             address=address_uz, price_per_day=_round(price), capacity=capacity, bedrooms=bedrooms, bathrooms=bathrooms,
+            # Long stays are cheaper per day: a month costs about 22 daily prices (villas usually daily only).
+            price_per_month=_round(price * rng.uniform(20, 24), 100_000) if kind in ("apartment", "studio", "house") or rng.random() < 0.3 else None,
             is_featured=index % 9 == 0, is_active=True,
         )
         self._attach(listing, [main, *extra])

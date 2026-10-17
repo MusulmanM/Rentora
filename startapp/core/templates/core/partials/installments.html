@@ -1,0 +1,18 @@
+{% load core_tags %}{% if booking.has_installments %}{% next_installment booking as next_part %}
+<details class="installments"{% if open %} open{% endif %}>
+  <summary><b>{{ booking.get_payment_plan_display }}</b>{% if booking.is_monthly %} · <span>{{ booking.months }}</span> <span>oy</span>{% endif %} · {% installment_summary booking as summary %}<span>{{ summary.paid_count }}/{{ summary.count }}</span> <span>to'langan</span>{% if summary.left_total %} · <span>qoldi</span> {{ summary.left_total|money }} so'm{% endif %}</summary>
+  <ol class="installment-list">
+    {% for part in booking.installments.all %}
+    <li class="installment installment-{{ part.status }}{% if part.is_overdue %} is-overdue{% endif %}">
+      <span class="installment-no">{{ part.number }}.</span>
+      <span class="installment-date">{{ part.due_date|date:'d.m.Y' }}</span>
+      <b class="installment-amount">{{ part.amount|money }} so'm</b>
+      <span class="installment-status">{% if part.status == 'paid' %}To'langan{% elif part.is_overdue %}Muddati o'tgan{% else %}Kutilmoqda{% endif %}</span>
+      {% if role == 'customer' and part.status == 'pending' and booking.payment_method != 'cash' and next_part and part.pk == next_part.pk and booking.status != 'cancelled' and booking.status != 'returned' %}<a class="btn btn-dark btn-small" href="{% url 'pay-installment' part.pk %}">To'lash</a>{% endif %}
+      {% if role == 'provider' and part.status == 'pending' and booking.payment_method == 'cash' and booking.status != 'cancelled' %}<form method="post" action="{% url 'provider-installment-paid' part.pk %}" data-confirm="Shu to'lovni naqd qabul qilganingizni tasdiqlaysizmi?">{% csrf_token %}<button class="btn btn-outline btn-small" type="submit">To'lov qabul qilindi</button></form>{% endif %}
+    </li>
+    {% endfor %}
+  </ol>
+  {% if role == 'customer' and booking.payment_method == 'cash' %}<p class="installment-note">Naqd to'lovlar ijara beruvchiga topshiriladi; u qabul qilganini belgilaydi.</p>{% endif %}
+</details>
+{% endif %}

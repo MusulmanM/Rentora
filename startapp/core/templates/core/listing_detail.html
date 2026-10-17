@@ -1,8 +1,11 @@
 {% extends 'core/base.html' %}
-{% load static core_tags %}
+{% load static core_tags l10n %}
 {% block title %}{{ listing.title }} — Rentora{% endblock %}
+{% block meta_description %}{{ listing.title }} — {{ listing.price_per_day|money }} so'm / kun. {{ listing.description|striptags|truncatechars:140 }}{% endblock %}
+{% block seo %}{% with seo_title=listing.title|add:" — Rentora" seo_image=listing.primary_image_url seo_type="product" %}{% include 'core/partials/seo_meta.html' with seo_description=listing.description|striptags|truncatechars:180 %}{% endwith %}{% endblock %}
 {% block extra_head %}
 <link rel="stylesheet" href="{% static 'core/listing-images.css' %}">
+<script type="application/ld+json">{% listing_jsonld listing review_average review_count %}</script>
 <link rel="stylesheet" href="{% static 'core/chat.css' %}?v=20261014-v2">
 {% endblock %}
 {% block content %}
@@ -21,7 +24,7 @@
       <h1 data-localized-page-title data-localized-text data-uz="{{ listing.title }}" data-ru="{{ listing.title_ru|default:listing.title }}" data-en="{{ listing.title_en|default:listing.title }}">{{ listing.title }}</h1>
       <p>{% if listing.is_home %}Qulay uy ijarasi{% else %}Avtomobil ijarasi{% endif %} · {{ listing.get_kind_display }}</p>
     </div>
-    <div class="detail-price"><strong>{{ listing.price_per_day|money }} <small>so'm</small></strong><span>har bir kun uchun</span></div>
+    <div class="detail-price"><strong>{{ listing.price_per_day|money }} <small>so'm</small></strong><span>har bir kun uchun</span>{% if listing.price_per_month and listing.is_home %}<span class="detail-price-month"><b>{{ listing.price_per_month|money }} so'm</b> <span>oyiga</span></span>{% endif %}</div>
   </div>
   <div class="detail-layout">
     <div class="detail-main-column">
@@ -83,13 +86,16 @@
     <aside class="booking-card">
       <div class="booking-card-top"><span class="booking-mini-label">RENTORA BRONI</span><h2>Safaringizni rejalashtiring</h2><p>Sanalarni tanlang — umumiy narx avtomatik hisoblanadi.</p></div>
       {% if can_book_listing %}
-      <form method="post" action="{% url 'create-booking' listing.slug %}" class="booking-form" data-booking-form data-price="{{ listing.price_per_day }}">{% csrf_token %}
+      <form method="post" action="{% url 'create-booking' listing.slug %}" class="booking-form" data-booking-form data-price="{{ listing.price_per_day|unlocalize }}"{% if form.monthly_available %} data-price-month="{{ listing.price_per_month|unlocalize }}"{% endif %}>{% csrf_token %}
         {% if form.non_field_errors %}<div class="form-error-box">{{ form.non_field_errors }}</div>{% endif %}
+        {% if form.monthly_available %}<div class="form-field"><span class="form-label">{{ form.rental_unit.label }}</span><div class="choice-pills" data-rental-unit>{{ form.rental_unit }}</div>{% if form.rental_unit.errors %}<small class="field-error">{{ form.rental_unit.errors|striptags }}</small>{% endif %}</div>{% endif %}
         <div class="form-field"><label for="id_check_in">Kelish / boshlanish</label>{{ form.check_in }}{% if form.check_in.errors %}<small class="field-error">{{ form.check_in.errors|striptags }}</small>{% endif %}</div>
-        <div class="form-field"><label for="id_check_out">Ketish / tugash</label>{{ form.check_out }}{% if form.check_out.errors %}<small class="field-error">{{ form.check_out.errors|striptags }}</small>{% endif %}</div>
+        <div class="form-field" data-daily-only><label for="id_check_out">Ketish / tugash</label>{{ form.check_out }}{% if form.check_out.errors %}<small class="field-error">{{ form.check_out.errors|striptags }}</small>{% endif %}</div>
+        {% if form.monthly_available %}<div class="form-field" data-monthly-only hidden><label for="id_months">{{ form.months.label }}</label>{{ form.months }}{% if form.months.errors %}<small class="field-error">{{ form.months.errors|striptags }}</small>{% endif %}</div>{% endif %}
         <div class="form-field"><label for="id_guests">{{ form.guests.label }}</label>{{ form.guests }}{% if form.guests.errors %}<small class="field-error">{{ form.guests.errors|striptags }}</small>{% endif %}</div>
-        <div class="form-field"><label for="id_payment_method">{{ form.payment_method.label }}</label>{{ form.payment_method }}{% if form.payment_method.errors %}<small class="field-error">{{ form.payment_method.errors|striptags }}</small>{% endif %}</div>
-        <div class="price-summary"><div><span>Kunlik narx</span><span>{{ listing.price_per_day|money }} so'm</span></div><div><span>Davomiyligi</span><span id="booking-days">Sanalarni tanlang</span></div><div class="price-total"><b>Jami</b><strong id="booking-total">—</strong></div></div>
+        <div class="form-field"><label for="id_payment_method">{{ form.payment_method.label }}</label>{{ form.payment_method }}{% if form.cash_only %}<small class="payment-note">Bu ijara beruvchi hozircha faqat naqd to'lov qabul qiladi.</small>{% else %}<small class="payment-note">Click / Payme to'lovi Rentora orqali amalga oshiriladi; mahsulot topshirilgach pul ijara beruvchiga o'tkaziladi, undan oldin bekor qilinsa qaytariladi.</small>{% endif %}{% if form.payment_method.errors %}<small class="field-error">{{ form.payment_method.errors|striptags }}</small>{% endif %}</div>
+        {% if form.monthly_available %}<div class="form-field" data-monthly-only hidden><span class="form-label">{{ form.payment_plan.label }}</span><div class="choice-pills choice-pills-stack" data-payment-plan>{{ form.payment_plan }}</div>{% if form.payment_plan.errors %}<small class="field-error">{{ form.payment_plan.errors|striptags }}</small>{% endif %}</div>{% endif %}
+        <div class="price-summary"><div data-daily-only><span>Kunlik narx</span><span>{{ listing.price_per_day|money }} so'm</span></div>{% if form.monthly_available %}<div data-monthly-only hidden><span>Oylik narx</span><span>{{ listing.price_per_month|money }} so'm</span></div>{% endif %}<div><span>Davomiyligi</span><span id="booking-days">Sanalarni tanlang</span></div><div class="price-total"><b>Jami</b><strong id="booking-total">—</strong></div><div class="booking-schedule" data-booking-schedule hidden></div></div>
         {% if request.user.is_authenticated %}<button class="btn btn-dark booking-submit" type="submit">Bron qilish <span>→</span></button><p class="booking-reassurance">Naqd to'lov xizmatni olganda; online to'lov buyurtma yuborilgach amalga oshiriladi.</p>
         {% else %}<a class="btn btn-dark booking-submit" href="{% url 'login' %}?next={{ request.path|urlencode }}">Bron qilish uchun kiring <span>→</span></a><p class="booking-reassurance">Akkauntingiz yo'qmi? <a href="{% url 'register' %}">Ro'yxatdan o'ting</a></p>{% endif %}
       </form>
@@ -102,7 +108,7 @@
   <section class="similar-section" aria-labelledby="similar-title">
     <h2 id="similar-title">O'xshash e'lonlar</h2>
     <div class="listing-grid similar-grid">
-      {% for item in similar_listings %}<article class="listing-card"><a class="listing-image-wrap" href="{% url 'listing-detail' item.slug %}"><img class="listing-image" src="{{ item.primary_image_url|default:'https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=900&q=85' }}" alt="{{ item.title }}" loading="lazy"><span class="listing-kind">{% if item.is_home %}⌂ Uy ijarasi{% else %}▱ Avtomobil{% endif %}</span></a><div class="listing-card-body"><div class="listing-location"><span>⌖</span> {% listing_location item %}</div><a href="{% url 'listing-detail' item.slug %}" class="listing-title-link"><h3>{% localized_title item %}</h3></a><div class="listing-card-bottom"><div><strong>{{ item.price_per_day|money }} <small>so'm</small></strong><span class="price-period">/ kun</span></div><a class="card-arrow" href="{% url 'listing-detail' item.slug %}" aria-label="{{ item.title }} tafsilotlari">↗</a></div></div></article>{% endfor %}
+      {% for item in similar_listings %}<article class="listing-card"><a class="listing-image-wrap" href="{% url 'listing-detail' item.slug %}"><img class="listing-image" src="{{ item.card_image_url|default:'https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=900&q=85' }}" alt="{{ item.title }}" loading="lazy"><span class="listing-kind">{% if item.is_home %}⌂ Uy ijarasi{% else %}▱ Avtomobil{% endif %}</span></a><div class="listing-card-body"><div class="listing-location"><span>⌖</span> {% listing_location item %}</div><a href="{% url 'listing-detail' item.slug %}" class="listing-title-link"><h3>{% localized_title item %}</h3></a><div class="listing-card-bottom"><div><strong>{{ item.price_per_day|money }} <small>so'm</small></strong><span class="price-period">/ kun</span></div><a class="card-arrow" href="{% url 'listing-detail' item.slug %}" aria-label="{{ item.title }} tafsilotlari">↗</a></div></div></article>{% endfor %}
     </div>
   </section>
   {% endif %}

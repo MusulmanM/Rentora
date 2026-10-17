@@ -27,7 +27,8 @@ ENV DJANGO_DEBUG=0 \
     MEDIA_ROOT=/data/media \
     CHAT_MEDIA_ROOT=/data/chat-media \
     SERVE_MEDIA=1 \
-    CACHE_DIR=/data/cache
+    CACHE_DIR=/data/cache \
+    WEB_CONCURRENCY=3
 
 VOLUME ["/data"]
 EXPOSE 8000
@@ -36,4 +37,5 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/', timeout=4)"
 
 ENTRYPOINT ["./docker-entrypoint.sh"]
-CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "3", "--worker-class", "gthread", "--threads", "4", "--timeout", "600", "--access-logfile", "-"]
+# Worker count comes from WEB_CONCURRENCY (gunicorn reads it), so small servers can use fewer.
+CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--worker-class", "gthread", "--threads", "4", "--timeout", "600", "--access-logfile", "-"]

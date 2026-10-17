@@ -2,6 +2,7 @@ from datetime import date
 from datetime import timedelta
 import json
 import logging
+from decimal import Decimal
 import secrets
 
 from django.conf import settings
@@ -26,6 +27,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
+from .analytics import provider_income
 from .availability import ACTIVE_BOOKING_STATUSES, active_bookings, can_view_listing, listings_visible_to
 from .chat import (
     conversations_for, mark_read, other_side_last_read, post_message,
@@ -33,21 +35,25 @@ from .chat import (
 )
 from .forms import (
     BookingForm, ChatMessageForm, ContactMessageForm, HostOnboardingForm, ListingAvailabilityForm,
-    ListingReviewForm, PhoneNumberForm, ProfileEditForm, RegistrationForm, RegistrationOTPForm,
-    RentalListingForm,
+    ListingReviewForm, PhoneNumberForm, ProfileEditForm, ProviderPaymentForm, RegistrationForm,
+    RegistrationOTPForm, RentalListingForm, StartAppAuthenticationForm,
 )
 from .media import serve_private_file
 from .models import (
     Booking, BookingOrder, District, HostProfile, ListingReview, PendingRegistration,
-    PendingPhoneVerification, Region, RentalListing, ListingImage, TelegramAccount,
+    Installment, Payout, PendingPhoneVerification, ProviderPaymentAccount, Region, RentalListing, ListingImage, TelegramAccount,
     UserProfile, Conversation, ChatMessage, account_for,
 )
 from .security import rate_limited
-from .payments import payment_url
+from .installments import create_installments, mark_installment_paid, next_unpaid
+from .payments import installment_payment_url, payment_url
+from .payouts import commission_percent, notify_card_review, refund_for_cancelled, release_payout
 from .serializers import BookingSerializer, ListingSerializer
 from .ai_assistant import RentalAssistantError, find_rentals
 from .listing_translation import translate_listing, translation_enabled
-from .telegram import TelegramError, handle_telegram_update, notify_booking_parties, send_message
+from .telegram import (
+    TelegramError, handle_telegram_update, notify_booking_parties, notify_installment_paid, send_localized, send_message,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -163,10 +169,22 @@ def home(request):
 class StartAppLoginView(LoginView):
     template_name = "core/login.html"
     redirect_authenticated_user = True
+    authentication_form = StartAppAuthenticationForm
+
+    def get_initial(self):
+        # After a password reset the username is already filled in.
+        initial = super().get_initial()
+        username = self.request.GET.get("username", "").strip()[:150]
+        if username:
+            initial["username"] = username
+        return initial
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["page_title"] = "Kirish"
+        form = context.get("form")
+        context["account_blocked"] = bool(form and form.is_bound and form.has_error("__all__", "blocked"))
+        context["password_missing"] = bool(form and form.is_bound and form.has_error("__all__", "no_password"))
         return context
 
 
@@ -216,10 +234,7 @@ def register(request):
                             sent_at=now,
                         )
                         try:
-                            send_message(
-                                telegram_account.chat_id,
-                                f"Rentora ro'yxatdan o'tish kodi: {code}\nKod 10 daqiqa amal qiladi.",
-                            )
+                            send_localized(telegram_account.chat_id, "otp_register", code=code)
                         except TelegramError as exc:
                             pending.delete()
                             form.add_error(None, str(exc))
@@ -346,10 +361,7 @@ def resend_registration_otp(request):
         return redirect("verify-registration")
     code = f"{secrets.randbelow(1_000_000):06d}"
     try:
-        send_message(
-            pending.telegram_account.chat_id,
-            f"Rentora ro'yxatdan o'tish kodi: {code}\nKod 10 daqiqa amal qiladi.",
-        )
+        send_localized(pending.telegram_account.chat_id, "otp_register", code=code)
     except TelegramError as exc:
         messages.error(request, str(exc))
         return redirect("verify-registration")
@@ -398,7 +410,7 @@ def verify_profile_phone(request):
                 sent_at=now,
             )
             try:
-                send_message(account.chat_id, f"Rentora telefon tasdiqlash kodi: {code}\nKod 10 daqiqa amal qiladi.")
+                send_localized(account.chat_id, "otp_phone", code=code)
             except TelegramError as exc:
                 pending.delete()
                 form.add_error(None, str(exc))
@@ -510,7 +522,7 @@ def resend_profile_phone_otp(request):
         return redirect("confirm-profile-phone")
     code = f"{secrets.randbelow(1_000_000):06d}"
     try:
-        send_message(pending.telegram_account.chat_id, f"Rentora telefon tasdiqlash kodi: {code}\nKod 10 daqiqa amal qiladi.")
+        send_localized(pending.telegram_account.chat_id, "otp_phone", code=code)
     except TelegramError as exc:
         messages.error(request, str(exc))
         return redirect("confirm-profile-phone")
@@ -664,6 +676,7 @@ def create_booking(request, slug):
                     booking.listing = locked_listing
                     booking.full_clean()
                     booking.save()
+                    create_installments(booking)
                     messages.success(request, "Buyurtma qabul qilindi. Naqd to'lovni xizmatni olganingizda amalga oshirasiz.")
                 else:
                     order = BookingOrder(
@@ -673,6 +686,9 @@ def create_booking(request, slug):
                         check_out=form.cleaned_data["check_out"],
                         guests=form.cleaned_data["guests"],
                         payment_method=form.cleaned_data["payment_method"],
+                        rental_unit=form.cleaned_data["rental_unit"],
+                        months=form.cleaned_data["months"],
+                        payment_plan=form.cleaned_data["payment_plan"],
                         status=BookingOrder.Status.AWAITING_PAYMENT,
                     )
                     order.full_clean()
@@ -698,7 +714,7 @@ def create_booking(request, slug):
 
 @login_required
 def my_bookings(request):
-    bookings = Booking.objects.filter(user=request.user).select_related("listing").prefetch_related("listing__images")
+    bookings = Booking.objects.filter(user=request.user).select_related("listing").prefetch_related("listing__images", "installments")
     booking_orders = BookingOrder.objects.filter(
         user=request.user,
         status__in=[
@@ -708,14 +724,12 @@ def my_bookings(request):
             BookingOrder.Status.CANCELLED,
         ],
     ).select_related("listing").prefetch_related("listing__images")
-    active_bookings_count = bookings.filter(
-        status__in=ACTIVE_BOOKING_STATUSES,
-        check_out__gt=timezone.localdate(),
-    ).count()
+    active_bookings_count = active_bookings().filter(user=request.user).count()
     return render(request, "core/my_bookings.html", {
         "bookings": bookings,
         "booking_orders": booking_orders,
         "active_bookings_count": active_bookings_count,
+        "today": timezone.localdate(),
     })
 
 
@@ -784,6 +798,34 @@ def provider_company(request):
 
 
 @login_required
+@rate_limited("provider-payments", limit=10, window=900, by="user")
+def provider_payments(request):
+    """The provider adds the bank card that receives their share of online payments."""
+    get_object_or_404(HostProfile, user=request.user)
+    account, _ = ProviderPaymentAccount.objects.get_or_create(user=request.user)
+    form = ProviderPaymentForm(request.POST or None, account=account, user=request.user)
+    if request.method == "POST" and form.is_valid():
+        if form.save():
+            logger.info("Provider %s changed the payout card; waiting for approval.", request.user.pk)
+            transaction.on_commit(lambda: notify_card_review(account))
+            messages.success(request, "Karta saqlandi. Bosh admin tekshirib tasdiqlagach, mijozlar onlayn to'lay oladi.")
+        else:
+            messages.info(request, "O'zgarish yo'q.")
+        return redirect("provider-payments")
+    payouts = Payout.objects.filter(provider=request.user).select_related("booking", "booking__listing")[:50]
+    return render(request, "core/provider_payments.html", {
+        "form": form,
+        "account": account,
+        "payouts": payouts,
+        "commission_percent": commission_percent(),
+        "pending_total": sum(
+            (payout.net_amount for payout in payouts if payout.status in (Payout.Status.HELD, Payout.Status.READY)),
+            Decimal("0"),
+        ),
+    })
+
+
+@login_required
 def provider_dashboard(request):
     host_profile = get_object_or_404(HostProfile, user=request.user)
     listings = RentalListing.objects.filter(owner=request.user).select_related("region", "district").prefetch_related("images")
@@ -800,11 +842,9 @@ def provider_dashboard(request):
         listings = listings.filter(kind=kind)
     if status_filter in RentalListing.AvailabilityStatus.values:
         listings = listings.filter(availability_status=status_filter)
-    provider_bookings = Booking.objects.filter(
+    provider_bookings = active_bookings().filter(
         listing__owner=request.user,
-        status__in=ACTIVE_BOOKING_STATUSES,
-        check_out__gt=timezone.localdate(),
-    ).select_related("listing", "user").prefetch_related("listing__images")
+    ).select_related("listing", "user").prefetch_related("listing__images", "installments").order_by("check_out")
     if booking_status in (Booking.Status.PENDING, Booking.Status.CONFIRMED, Booking.Status.HANDED_OVER):
         provider_bookings = provider_bookings.filter(status=booking_status)
     if query:
@@ -819,11 +859,13 @@ def provider_dashboard(request):
         "provider_has_telegram": UserProfile.objects.filter(user=request.user).exists(),
         "rented_listing_ids": set(
             Booking.objects.filter(
-                listing__owner=request.user, status=Booking.Status.HANDED_OVER, check_out__gt=timezone.localdate(),
+                listing__owner=request.user, status=Booking.Status.HANDED_OVER,
             ).values_list("listing_id", flat=True)
         ),
         "filters": {"q": query, "kind": kind, "status": status_filter, "booking_status": booking_status},
         "is_filtered": bool(query or kind or status_filter or booking_status),
+        "income": provider_income(request.user, request.GET.get("year")),
+        "today": timezone.localdate(),
     })
 
 
@@ -847,7 +889,7 @@ def update_listing_availability(request, listing_id):
 @login_required
 @require_POST
 def update_provider_booking(request, booking_id, action):
-    if action not in {"confirm", "handover", "reject"}:
+    if action not in {"confirm", "handover", "reject", "return"}:
         raise Http404
     with transaction.atomic():
         booking = get_object_or_404(
@@ -855,6 +897,24 @@ def update_provider_booking(request, booking_id, action):
             pk=booking_id,
             listing__owner=request.user,
         )
+        if action == "return":
+            if booking.status != Booking.Status.HANDED_OVER:
+                messages.error(request, "Faqat mijozga topshirilgan mahsulotni qaytarilgan deb belgilash mumkin.")
+                return redirect("provider-dashboard")
+            late_days, debt = booking.late_days(), booking.current_debt()
+            if debt and request.POST.get("debt_paid") != "1":
+                messages.error(request, f"Avval kechikish qarzini oling: {late_days} kun, {debt:,.0f} so'm. Keyin \"Qarz to'landi\" belgisini qo'ying.")
+                return redirect("provider-dashboard")
+            now = timezone.now()
+            booking.status = Booking.Status.RETURNED
+            booking.returned_at = now
+            booking.overdue_days, booking.debt_amount = late_days, debt
+            booking.debt_paid_at = now if debt else None
+            booking.save(update_fields=["status", "returned_at", "overdue_days", "debt_amount", "debt_paid_at", "updated_at"])
+            base_url = request.build_absolute_uri("/").rstrip("/")
+            transaction.on_commit(lambda: notify_booking_parties(booking.pk, "returned", base_url))
+            messages.success(request, "Mahsulot qaytarildi." + (f" Qarz {debt:,.0f} so'm to'langan deb yozildi." if debt else ""))
+            return redirect("provider-dashboard")
         if booking.check_out <= timezone.localdate():
             messages.error(request, "Ijara muddati tugagan bronni o'zgartirib bo'lmaydi.")
             return redirect("provider-dashboard")
@@ -863,14 +923,17 @@ def update_provider_booking(request, booking_id, action):
             event = "confirmed"
         elif action == "handover" and booking.status == Booking.Status.CONFIRMED:
             booking.status = Booking.Status.HANDED_OVER
+            booking.handed_over_at = timezone.now()
             event = "handed_over"
+            transaction.on_commit(lambda: release_payout(booking))
         elif action == "reject" and booking.status in (Booking.Status.PENDING, Booking.Status.CONFIRMED):
             booking.status = Booking.Status.CANCELLED
             event = "rejected"
+            transaction.on_commit(lambda: refund_for_cancelled(booking))
         else:
             messages.error(request, "Bu bron uchun amalni bajarib bo'lmaydi.")
             return redirect("provider-dashboard")
-        booking.save(update_fields=["status", "updated_at"])
+        booking.save(update_fields=["status", "handed_over_at", "updated_at"])
         base_url = request.build_absolute_uri("/").rstrip("/")
         transaction.on_commit(lambda: notify_booking_parties(booking.pk, event, base_url))
     messages.success(request, {
@@ -1115,6 +1178,50 @@ def pay_booking_order(request, order_id):
 
 
 @login_required
+def pay_installment(request, installment_id):
+    """Pay the next part of an instalment plan online (Click / Payme)."""
+    installment = get_object_or_404(
+        Installment.objects.select_related("booking"), pk=installment_id, booking__user=request.user,
+    )
+    booking = installment.booking
+    if (
+        installment.status != Installment.Status.PENDING
+        or booking.payment_method not in (Booking.PaymentMethod.CLICK, Booking.PaymentMethod.PAYME)
+        or booking.status in (Booking.Status.CANCELLED, Booking.Status.RETURNED)
+    ):
+        messages.error(request, "Bu to'lovni onlayn to'lab bo'lmaydi.")
+        return redirect("my-bookings")
+    if next_unpaid(booking).pk != installment.pk:
+        messages.error(request, "Avval oldingi to'lovni to'lang.")
+        return redirect("my-bookings")
+    try:
+        return redirect(installment_payment_url(installment, request))
+    except ValueError as exc:
+        messages.error(request, str(exc))
+        return redirect("my-bookings")
+
+
+@login_required
+@require_POST
+def provider_installment_paid(request, installment_id):
+    """The provider received a cash part of an instalment plan."""
+    with transaction.atomic():
+        installment = get_object_or_404(
+            Installment.objects.select_for_update().select_related("booking"),
+            pk=installment_id, booking__listing__owner=request.user,
+        )
+        booking = installment.booking
+        if booking.payment_method != Booking.PaymentMethod.CASH or installment.status != Installment.Status.PENDING:
+            messages.error(request, "Bu to'lovni belgilab bo'lmaydi.")
+            return redirect("provider-dashboard")
+        mark_installment_paid(installment, Booking.PaymentMethod.CASH)
+        base_url = request.build_absolute_uri("/").rstrip("/")
+        transaction.on_commit(lambda: notify_installment_paid(installment.pk, base_url))
+    messages.success(request, f"{installment.number}-to'lov ({installment.amount:,.0f} so'm) qabul qilindi.".replace(",", " "))
+    return redirect("provider-dashboard")
+
+
+@login_required
 @require_POST
 def cancel_booking_order(request, order_id):
     order = get_object_or_404(BookingOrder, pk=order_id, user=request.user)
@@ -1138,6 +1245,7 @@ def cancel_booking(request, booking_id):
     if booking.status in (Booking.Status.PENDING, Booking.Status.CONFIRMED):
         booking.status = Booking.Status.CANCELLED
         booking.save(update_fields=["status", "updated_at"])
+        transaction.on_commit(lambda: refund_for_cancelled(booking))
         transaction.on_commit(lambda: notify_booking_parties(
             booking.pk, "cancelled", request.build_absolute_uri("/").rstrip("/"),
         ))
@@ -1221,7 +1329,7 @@ def listing_detail_api(request, listing_id):
 @permission_classes([IsAuthenticated])
 def bookings_api(request):
     if request.method == "GET":
-        bookings = Booking.objects.filter(user=request.user).select_related("listing").prefetch_related("listing__images")
+        bookings = Booking.objects.filter(user=request.user).select_related("listing").prefetch_related("listing__images", "installments")
         orders = BookingOrder.objects.filter(user=request.user).select_related("listing").prefetch_related("listing__images")
         entries = sorted([*bookings, *orders], key=lambda entry: entry.created_at, reverse=True)
         return Response(BookingSerializer(entries, many=True).data)
@@ -1243,5 +1351,6 @@ def cancel_booking_api(request, booking_id):
         return Response({"detail": "Bron avval bekor qilingan."}, status=status.HTTP_400_BAD_REQUEST)
     booking.status = Booking.Status.CANCELLED
     booking.save(update_fields=["status", "updated_at"])
+    transaction.on_commit(lambda: refund_for_cancelled(booking))
     transaction.on_commit(lambda: notify_booking_parties(booking.pk, "cancelled"))
     return Response(BookingSerializer(booking).data)

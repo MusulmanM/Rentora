@@ -17,7 +17,7 @@
   {% for thread in page %}
   <a class="helper-row" href="{% url 'helper-support-thread' thread.pk %}">
     {% user_avatar thread.customer "tg-avatar" %}
-    <span class="helper-row-main"><b data-no-translate="true">{{ thread.customer.get_full_name|default:thread.customer.username }}</b><small><span class="support-status support-{{ thread.support_status }}">{{ thread.get_support_status_display|default:"—" }}</span> · {{ thread.message_total }} ta xabar · {{ thread.updated_at|date:'d.m.Y H:i' }}</small></span>
+    <span class="helper-row-main"><b data-no-translate="true">{{ thread.customer.get_full_name|default:thread.customer.username }}</b>{% if thread.customer.account.is_guest %} <span class="guest-badge">Mehmon</span>{% endif %}<small><span class="support-status support-{{ thread.support_status }}">{{ thread.get_support_status_display|default:"—" }}</span> · {{ thread.message_total }} ta xabar · {{ thread.updated_at|date:'d.m.Y H:i' }}</small></span>
     {% if thread.unread_count %}<span class="tg-badge" aria-label="O'qilmagan xabarlar: {{ thread.unread_count }}">{{ thread.unread_count }}</span>{% endif %}
   </a>
   {% empty %}<p class="helper-muted">Bu filtr bo'yicha xabar topilmadi.</p>{% endfor %}

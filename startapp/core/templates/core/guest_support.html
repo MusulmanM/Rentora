@@ -1,0 +1,39 @@
+{% extends 'core/base.html' %}
+{% load static %}
+{% block title %}Admin bilan bog'lanish — Rentora{% endblock %}
+{% block body_class %}auth-body{% endblock %}
+{% block ai_widget %}{% endblock %}
+{% block content %}
+<div class="auth-shell">
+  <div class="auth-language">{% include 'core/language_switcher.html' %}</div>
+  <a class="brand auth-brand" href="{% url 'home' %}"><span class="brand-symbol"><i></i><i></i><i></i></span><span>Rentora</span></a>
+  <div class="auth-card guest-chat-card">
+    <a class="auth-back-link" href="{% url 'login' %}">← Kirish</a>
+    <p class="section-kicker">YORDAM</p>
+    <h1>Admin bilan yozishish.</h1>
+    {% if conversation %}
+    <p class="auth-subtitle">Javob shu yerda chiqadi — sahifani yopsangiz ham, shu brauzerda qaytib kirganingizda yozishma saqlanadi.</p>
+    <div class="guest-chat-log" data-guest-chat data-endpoint="{% url 'guest-support-messages' %}" role="log" aria-live="polite">
+      {% for message in chat_messages %}<div class="guest-msg{% if message.mine %} mine{% endif %}" data-id="{{ message.id }}"><b data-no-translate="true">{% if message.mine %}{{ guest_name }}{% else %}{{ message.sender }}{% endif %}</b><p data-no-translate="true">{{ message.text|default:"[fayl]" }}</p><small>{{ message.created_at }}</small></div>{% endfor %}
+    </div>
+    <form class="guest-chat-form" data-guest-form method="post" action="{% url 'guest-support-messages' %}">
+      {% csrf_token %}
+      <label class="visually-hidden" for="guest-chat-text">Xabar</label>
+      <textarea id="guest-chat-text" class="form-input" name="text" rows="2" maxlength="2000" placeholder="Xabar yozing…" required></textarea>
+      <button class="btn btn-dark" type="submit">Yuborish</button>
+    </form>
+    <p class="guest-chat-error" data-guest-error hidden></p>
+    {% else %}
+    <p class="auth-subtitle">Ro'yxatdan o'ta olmayapsizmi, akkauntingiz bloklandimi yoki kira olmayapsizmi? Yozing — admin yoki Rentora yordamchisi shu yerda javob beradi.</p>
+    <form method="post" class="auth-form">
+      {% csrf_token %}
+      {% if form.non_field_errors %}<div class="form-error-box">{{ form.non_field_errors }}</div>{% endif %}
+      {% for field in form %}<div class="form-field"><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}{% if field.errors %}<small class="field-error">{{ field.errors|striptags }}</small>{% endif %}</div>{% endfor %}
+      <button class="btn btn-dark auth-submit" type="submit">Adminga yozish <span>→</span></button>
+    </form>
+    <p class="guest-chat-note">Parol yoki SMS kodni hech kimga yozmang — admin ularni hech qachon so'ramaydi.</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}{% if conversation %}<script src="{% static 'core/guest-chat.js' %}?v=20261016-v1" defer></script>{% endif %}{% endblock %}

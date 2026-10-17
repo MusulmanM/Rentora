@@ -1,0 +1,39 @@
+{% extends 'core/base.html' %}
+{% load core_tags %}
+{% block title %}To'lov sozlamalari — Rentora{% endblock %}
+{% block body_class %}auth-body{% endblock %}
+{% block content %}
+<div class="auth-shell">
+  <div class="auth-language">{% include 'core/language_switcher.html' %}</div>
+  <a class="brand auth-brand" href="{% url 'provider-dashboard' %}"><span class="brand-symbol"><i></i><i></i><i></i></span><span>Rentora</span></a>
+  <div class="auth-card payment-settings-card">
+    <p class="section-kicker">TO'LOV SOZLAMALARI</p>
+    <h1>Pulni kartangizga oling.</h1>
+    <p class="auth-subtitle">Mijoz Click yoki Payme orqali to'laydi. Mahsulotni topshirib, "Mahsulot ijaraga topshirildi" tugmasini bosganingizdan keyin pul Rentora komissiyasi ({{ commission_percent|floatformat:"-2" }}%) ayirilgan holda shu kartaga o'tkaziladi. Topshirishdan oldin bron bekor qilinsa, pul mijozga qaytariladi. Naqd to'lov har doim mavjud.</p>
+
+    <div class="payment-status-list">
+      <div class="payment-status payment-status-{% if account.can_receive_payouts %}ready{% elif account.has_card %}pending{% else %}off{% endif %}">
+        <b>{% if account.has_card %}<span data-no-translate="true">{{ account.get_card_brand_display }} {{ account.masked_card }}</span>{% else %}Karta{% endif %}</b>
+        <span>{% if account.can_receive_payouts %}Faol — mijozlar onlayn to'lay oladi{% elif account.has_card %}Bosh admin tasdig'i kutilmoqda{% else %}Karta qo'shilmagan{% endif %}</span>
+      </div>
+    </div>
+
+    <form method="post" class="auth-form" autocomplete="off">
+      {% csrf_token %}
+      {% if form.non_field_errors %}<div class="form-error-box">{{ form.non_field_errors }}</div>{% endif %}
+      {% for field in form %}{% if field.name == 'accept_offer' %}<label class="checkbox-row offer-row">{{ field }} <span>{{ field.label }}</span></label>{% if field.errors %}<small class="field-error">{{ field.errors|striptags }}</small>{% endif %}{% else %}<div class="form-field"><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}{% if field.errors %}<small class="field-error">{{ field.errors|striptags }}</small>{% endif %}</div>{% endif %}{% endfor %}
+      <button class="btn btn-dark auth-submit" type="submit">Saqlash <span>→</span></button>
+    </form>
+    <p class="payment-note">Karta raqami shifrlangan holda saqlanadi va hech kimga to'liq ko'rsatilmaydi (faqat o'tkazmani yuboradigan bosh adminga). Kartani almashtirsangiz, u bosh admin qayta tasdiqlagandan keyin ishlaydi.</p>
+
+    {% if payouts %}
+    <h2 class="payout-title">O'tkazmalar</h2>
+    {% if pending_total %}<p class="payment-note">Kutilayotgan summa: <b>{{ pending_total|money }} so'm</b></p>{% endif %}
+    <div class="payout-list">
+      {% for payout in payouts %}<div class="payout-row payout-{{ payout.status }}"><div><b data-no-translate="true">#{{ payout.booking_id }} {% localized_title payout.booking.listing %}</b><small>{{ payout.created_at|date:'d.m.Y' }} · mijoz {{ payout.gross_amount|money }} so'm · komissiya {{ payout.commission_amount|money }} so'm</small></div><div class="payout-amount"><b>{{ payout.net_amount|money }} so'm</b><small>{{ payout.get_status_display }}</small></div></div>{% endfor %}
+    </div>
+    {% endif %}
+    <a class="btn btn-dark auth-submit back-button" href="{% url 'provider-dashboard' %}"><span>←</span> Ijara beruvchi paneli</a>
+  </div>
+</div>
+{% endblock %}

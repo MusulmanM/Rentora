@@ -74,3 +74,71 @@ def stars(value):
     except (TypeError, ValueError):
         filled = 0
     return "★" * filled + "☆" * (5 - filled)
+
+
+@register.simple_tag(takes_context=True)
+def absolute_url(context, url):
+    """A full https:// address for links shared outside the site (Open Graph, canonical)."""
+    if not url:
+        return ""
+    url = str(url)
+    if url.startswith(("https://", "http://")):
+        return url
+    from django.conf import settings
+
+    request = context.get("request")
+    base = getattr(settings, "PUBLIC_SITE_URL", "") or (request.build_absolute_uri("/") if request else "")
+    return base.rstrip("/") + "/" + url.lstrip("/")
+
+
+@register.simple_tag(takes_context=True)
+def listing_jsonld(context, listing, review_average=None, review_count=0):
+    """schema.org Product data for search results (name, photo, daily price, rating)."""
+    import json
+
+    from django.utils.safestring import mark_safe
+
+    image = absolute_url(context, listing.primary_image_url)
+    data = {
+        "@context": "https://schema.org",
+        "@type": "Product",
+        "name": listing.title,
+        "description": (listing.description or "")[:500],
+        "url": absolute_url(context, context["request"].path),
+        "brand": {"@type": "Brand", "name": "Rentora"},
+        "category": "Car rental" if listing.kind == "car" else "Home rental",
+        "offers": {
+            "@type": "Offer",
+            "price": f"{listing.price_per_day:.0f}",
+            "priceCurrency": "UZS",
+            "availability": "https://schema.org/InStock",
+            "priceSpecification": {
+                "@type": "UnitPriceSpecification", "price": f"{listing.price_per_day:.0f}",
+                "priceCurrency": "UZS", "unitCode": "DAY",
+            },
+        },
+    }
+    if image:
+        data["image"] = [image]
+    if review_count and review_average:
+        data["aggregateRating"] = {
+            "@type": "AggregateRating", "ratingValue": f"{float(review_average):.1f}", "reviewCount": int(review_count),
+        }
+    # "</" cannot appear inside the JSON, so the script block can never be closed early.
+    return mark_safe(json.dumps(data, ensure_ascii=False).replace("</", "<\\/"))
+
+
+@register.simple_tag
+def next_installment(booking):
+    """The first unpaid part of a booking's instalment plan (only that one can be paid online)."""
+    for part in booking.installments.all():
+        if part.status == "pending":
+            return part
+    return None
+
+
+@register.simple_tag
+def installment_summary(booking):
+    from ..installments import paid_summary
+
+    return paid_summary(booking)

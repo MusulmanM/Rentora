@@ -3,7 +3,7 @@ import re
 from django import forms
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.contrib.auth.forms import UserCreationForm
+from django.contrib.auth.forms import AuthenticationForm, SetPasswordForm, UserCreationForm
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 
@@ -11,6 +11,8 @@ from .models import (
     Booking, BookingOrder, ChatMessage, ContactMessage, District, HostProfile, ListingImage, ListingReview,
     PendingPhoneVerification, PendingRegistration, Region, RentalListing, UserProfile,
 )
+from .installments import MAX_MONTHS, add_months, allowed_plans
+from .payments import available_payment_methods
 from .uploads import validate_image_upload, validate_media_upload
 
 User = get_user_model()
@@ -101,9 +103,22 @@ class PhoneNumberForm(forms.Form):
 
 
 class BookingForm(forms.ModelForm):
+    rental_unit = forms.ChoiceField(
+        label="Ijara turi", choices=Booking.RentalUnit.choices, initial=Booking.RentalUnit.DAY,
+        widget=forms.RadioSelect, required=False,
+    )
+    months = forms.TypedChoiceField(
+        label="Necha oyga", coerce=int, required=False, empty_value=None,
+        choices=[(n, f"{n} oy") for n in range(1, MAX_MONTHS + 1)],
+    )
+    payment_plan = forms.ChoiceField(
+        label="To'lov rejasi", choices=Booking.PaymentPlan.choices, initial=Booking.PaymentPlan.FULL,
+        widget=forms.RadioSelect, required=False,
+    )
+
     class Meta:
         model = Booking
-        fields = ("check_in", "check_out", "guests", "payment_method")
+        fields = ("rental_unit", "check_in", "check_out", "months", "guests", "payment_method", "payment_plan")
         widgets = {
             "check_in": forms.DateInput(attrs={"type": "date", "class": "form-input"}, format="%Y-%m-%d"),
             "check_out": forms.DateInput(attrs={"type": "date", "class": "form-input"}, format="%Y-%m-%d"),
@@ -126,9 +141,41 @@ class BookingForm(forms.ModelForm):
         if listing:
             self.fields["guests"].widget.attrs["max"] = listing.capacity
             self.fields["guests"].initial = 1
+            # Online payment goes to the owner's own Click / Payme merchant, so offer only what they connected.
+            allowed = available_payment_methods(listing)
+            self.fields["payment_method"].choices = [
+                (value, label) for value, label in Booking.PaymentMethod.choices if value in allowed
+            ]
+            self.cash_only = allowed == [Booking.PaymentMethod.CASH]
+        # Monthly rental: homes whose provider set a monthly price. The end date then follows the months.
+        self.monthly_available = bool(listing and listing.kind == RentalListing.Kind.HOME and listing.price_per_month)
+        self.fields["check_out"].required = False
+        self.fields["months"].widget.attrs["class"] = "form-input"
+        for name in ("rental_unit", "payment_plan"):
+            self.fields[name].widget.attrs.pop("class", None)  # radio pills, not text inputs
+        if not self.monthly_available:
+            self.fields["rental_unit"].choices = [(Booking.RentalUnit.DAY, "Kunlik")]
+            self.fields["payment_plan"].choices = [(Booking.PaymentPlan.FULL, "To'liq")]
 
     def clean(self):
         cleaned = super().clean()
+        unit = cleaned.get("rental_unit") or Booking.RentalUnit.DAY
+        plan = cleaned.get("payment_plan") or Booking.PaymentPlan.FULL
+        cleaned["rental_unit"], cleaned["payment_plan"] = unit, plan
+        if unit == Booking.RentalUnit.MONTH:
+            months = cleaned.get("months")
+            if not self.monthly_available:
+                self.add_error("rental_unit", "Bu e'lonni faqat kunlik ijaraga olish mumkin.")
+            elif not months:
+                self.add_error("months", "Necha oyga ijaraga olishingizni tanlang.")
+            elif cleaned.get("check_in"):
+                cleaned["check_out"] = add_months(cleaned["check_in"], months)
+        else:
+            cleaned["months"] = None
+            if not cleaned.get("check_out") and "check_out" not in self.errors:
+                self.add_error("check_out", "Tugash sanasini tanlang.")
+        if plan not in allowed_plans(unit, cleaned.get("months")):
+            self.add_error("payment_plan", "Bo'lib to'lash faqat oylik ijarada mumkin (har oy — kamida 2 oy).")
         if self.listing and self.listing.owner_id == getattr(self.user, "pk", None):
             self.add_error(None, "O'zingiz joylagan e'lonni bron qila olmaysiz.")
         if self.listing and self.listing.availability_status != RentalListing.AvailabilityStatus.ACTIVE:
@@ -257,7 +304,7 @@ class RentalListingForm(forms.ModelForm):
         model = RentalListing
         fields = (
             "kind", "title", "title_ru", "title_en", "region", "district", "address",
-            "description", "description_ru", "description_en", "price_per_day", "capacity",
+            "description", "description_ru", "description_en", "price_per_day", "price_per_month", "capacity",
             "bedrooms", "bathrooms", "brand", "transmission", "year",
         )
         field_classes = {"region": RegionChoiceField, "district": RegionChoiceField}
@@ -265,7 +312,7 @@ class RentalListingForm(forms.ModelForm):
             "kind": "E'lon turi", "title": "Nomi", "title_ru": "Nomi (RU)", "title_en": "Nomi (EN)",
             "region": "Viloyat", "district": "Shahar / tuman", "address": "Manzil",
             "description": "Tavsif", "description_ru": "Tavsif (RU)", "description_en": "Tavsif (EN)",
-            "price_per_day": "Kunlik narx (so'm)", "bedrooms": "Yotoq xonalari", "bathrooms": "Hammomlar",
+            "price_per_day": "Kunlik narx (so'm)", "price_per_month": "Oylik narx (so'm)", "bedrooms": "Yotoq xonalari", "bathrooms": "Hammomlar",
             "brand": "Marka", "transmission": "Uzatmalar qutisi", "year": "Ishlab chiqarilgan yil",
         }
         widgets = {
@@ -312,7 +359,11 @@ class RentalListingForm(forms.ModelForm):
                 for name in HOME_ONLY_FIELDS:
                     self.fields[name].required = True
                     self.fields[name].widget.attrs.update({"min": 0, "max": 50})
+                self.fields["price_per_month"].required = False
+                self.fields["price_per_month"].widget.attrs.update({"min": 1, "step": "10000"})
+                self.fields["price_per_month"].help_text = "Ixtiyoriy. Kiritsangiz, mijozlar uyni oylab ham ijaraga ola oladi."
             else:
+                del self.fields["price_per_month"]
                 self.fields["brand"].required = True
                 self.fields["brand"].widget.attrs["placeholder"] = "Masalan: Chevrolet"
                 self.fields["transmission"].required = True
@@ -350,7 +401,7 @@ class RentalListingForm(forms.ModelForm):
             (LISTING_KIND_COPY[self.listing_kind]["details_title"], ("capacity", *(
                 HOME_ONLY_FIELDS if self.listing_kind == RentalListing.Kind.HOME else CAR_ONLY_FIELDS
             ))),
-            ("Narx", ("price_per_day",)),
+            ("Narx", ("price_per_day", "price_per_month")),
             ("Tarjimalar (ixtiyoriy)", ("title_ru", "title_en", "description_ru", "description_en")),
             ("Rasmlar", ("remove_images", "image_uploads")),
         ]
@@ -370,6 +421,12 @@ class RentalListingForm(forms.ModelForm):
         if year and not 1980 <= year <= timezone.localdate().year + 1:
             raise ValidationError(f"Yilni 1980–{timezone.localdate().year + 1} oralig'ida kiriting.")
         return year
+
+    def clean_price_per_month(self):
+        price = self.cleaned_data.get("price_per_month")
+        if price is not None and price <= 0:
+            raise ValidationError("Oylik narx 0 dan katta bo'lishi kerak.")
+        return price
 
     def clean_price_per_day(self):
         price = self.cleaned_data.get("price_per_day")
@@ -595,3 +652,204 @@ class HelperUserCreateForm(UserCreationForm):
         if email and User.objects.filter(email__iexact=email).exists():
             raise ValidationError("Bu elektron pochta allaqachon ro'yxatdan o'tgan.")
         return email
+
+
+# Known BINs fill in the card type; co-branded cards (e.g. Humo-Visa 4073..., Uzcard-Mastercard) start
+# with other digits, so the owner picks the type and any valid 16-digit card is accepted.
+_CARD_PREFIXES = {"8600": "uzcard", "5614": "uzcard", "9860": "humo"}
+
+
+def _luhn_ok(number):
+    total = 0
+    for index, digit in enumerate(reversed(number)):
+        value = int(digit)
+        if index % 2:
+            value = value * 2 - 9 if value > 4 else value * 2
+        total += value
+    return total % 10 == 0
+
+
+class ProviderPaymentForm(forms.Form):
+    """The provider's payout card. Only the last 4 digits are ever shown again."""
+
+    card_number = forms.CharField(
+        label="Karta raqami (Uzcard / Humo)", max_length=23, required=False,
+        widget=forms.TextInput(attrs={"inputmode": "numeric", "autocomplete": "off", "placeholder": "8600 0000 0000 0000"}),
+    )
+    card_brand = forms.ChoiceField(
+        label="Karta turi", required=False,
+        choices=[("", "Avtomatik aniqlash"), ("uzcard", "Uzcard"), ("humo", "Humo")],
+    )
+    card_holder = forms.CharField(label="Karta egasi (ism familiya)", max_length=80)
+    accept_offer = forms.BooleanField(
+        label="Ommaviy ofertaga roziman: Rentora mijoz to'lovini qabul qiladi va mahsulot topshirilgach, komissiyani ayirib, qolganini shu kartaga o'tkazadi.",
+    )
+    current_password = forms.CharField(
+        label="Hisobingiz paroli", widget=forms.PasswordInput(attrs={"autocomplete": "current-password"}),
+        help_text="Karta ma'lumotlarini o'zgartirish uchun parolingizni kiriting.",
+    )
+
+    def __init__(self, *args, account, user, **kwargs):
+        self.account = account
+        self.user = user
+        kwargs.setdefault("initial", {}).update({
+            "card_holder": account.card_holder, "card_brand": account.card_brand,
+            "accept_offer": account.offer_accepted_at is not None,
+        })
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            if not isinstance(field.widget, forms.CheckboxInput):
+                field.widget.attrs.setdefault("class", "form-input")
+        if account.has_card:
+            self.fields["card_number"].help_text = f"Saqlangan karta: {account.masked_card}. O'zgartirish uchungina yangisini kiriting."
+
+    def clean_card_number(self):
+        number = re.sub(r"[\s-]", "", self.cleaned_data.get("card_number", ""))
+        if not number:
+            if not self.account.has_card:
+                raise ValidationError("Karta raqamini kiriting.")
+            return ""
+        if not number.isdigit() or len(number) != 16:
+            raise ValidationError("Karta raqami 16 ta raqamdan iborat bo'ladi.")
+        if not _luhn_ok(number):
+            raise ValidationError("Karta raqami noto'g'ri. Tekshirib qayta kiriting.")
+        return number
+
+    def clean(self):
+        cleaned = super().clean()
+        number, brand = cleaned.get("card_number"), cleaned.get("card_brand")
+        if number and not brand:
+            brand = _CARD_PREFIXES.get(number[:4], "")
+            if not brand:
+                self.add_error("card_brand", "Karta turini tanlang: Uzcard yoki Humo.")
+        if not number and not brand:
+            brand = self.account.card_brand
+        cleaned["card_brand"] = brand
+        return cleaned
+
+    def clean_card_holder(self):
+        holder = " ".join(self.cleaned_data["card_holder"].split())
+        if len(holder) < 3:
+            raise ValidationError("Karta egasining ism familiyasini kiriting.")
+        return holder
+
+    def clean_current_password(self):
+        password = self.cleaned_data["current_password"]
+        if not self.user.check_password(password):
+            raise ValidationError("Parol noto'g'ri.")
+        return password
+
+    def save(self):
+        """Store the card. A new card or holder needs the head admin's approval again."""
+        account, data = self.account, self.cleaned_data
+        changed = False
+        if data["card_number"]:
+            account.card_number = data["card_number"]
+            changed = True
+        if data["card_brand"] and data["card_brand"] != account.card_brand:
+            account.card_brand = data["card_brand"]
+            changed = True
+        if data["card_holder"] != account.card_holder:
+            account.card_holder = data["card_holder"]
+            changed = True
+        if account.offer_accepted_at is None:
+            account.offer_accepted_at = timezone.now()
+        if changed:
+            account.approved = False
+        account.save()
+        return changed
+
+
+class GuestSupportForm(forms.Form):
+    """First message from a visitor without an account (sign-up help, blocked account, ...)."""
+
+    TOPICS = (
+        ("register", "Ro'yxatdan o'tish"),
+        ("blocked", "Akkauntim bloklangan"),
+        ("login", "Kira olmayapman / parolni unutdim"),
+        ("other", "Boshqa savol"),
+    )
+    name = forms.CharField(label="Ismingiz", max_length=80, widget=forms.TextInput(attrs={"autocomplete": "name"}))
+    phone_number = forms.CharField(
+        label="Telefon raqamingiz", max_length=24, required=False,
+        widget=forms.TextInput(attrs={"placeholder": "+998 90 123 45 67", "autocomplete": "tel"}),
+        help_text="Ixtiyoriy. Akkauntingizni topishimizga yordam beradi.",
+    )
+    topic = forms.ChoiceField(label="Mavzu", choices=TOPICS)
+    message = forms.CharField(label="Xabar", max_length=2000, widget=forms.Textarea(attrs={"rows": 4}))
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            field.widget.attrs.setdefault("class", "form-input")
+
+    def clean_name(self):
+        name = " ".join(self.cleaned_data["name"].split())
+        if len(name) < 2:
+            raise ValidationError("Ismingizni kiriting.")
+        return name
+
+    def clean_phone_number(self):
+        value = self.cleaned_data.get("phone_number", "").strip()
+        return normalize_phone_number(value) if value else ""
+
+    def clean_message(self):
+        message = self.cleaned_data["message"].strip()
+        if len(message) < 3:
+            raise ValidationError("Xabarni yozing.")
+        return message
+
+
+class StartAppAuthenticationForm(AuthenticationForm):
+    """Tells a blocked user why they cannot sign in, but only after the right password was given."""
+
+    error_messages = {
+        **AuthenticationForm.error_messages,
+        "blocked": "Akkauntingiz bloklangan. Ochish uchun quyidagi tugma orqali admin bilan yozishing.",
+        "no_password": "Bu akkauntda parol yo'q (admin o'chirgan). Quyidagi \"Parolni tiklash\" orqali yangi parol o'rnating.",
+    }
+
+    def clean(self):
+        try:
+            return super().clean()
+        except ValidationError:
+            username, password = self.cleaned_data.get("username"), self.cleaned_data.get("password")
+            user = get_user_model().objects.filter(username=username).first() if username else None
+            if user is not None and user.is_active and not user.has_usable_password():
+                raise ValidationError(self.error_messages["no_password"], code="no_password") from None
+            if (
+                user is not None and not user.is_active and password and user.check_password(password)
+                and not getattr(getattr(user, "account", None), "is_guest", False)
+            ):
+                raise ValidationError(self.error_messages["blocked"], code="blocked") from None
+            raise
+
+
+class PasswordResetRequestForm(forms.Form):
+    login = forms.CharField(
+        label="Foydalanuvchi nomi yoki telefon raqami", max_length=150,
+        widget=forms.TextInput(attrs={"class": "form-input", "autocomplete": "username", "placeholder": "Masalan: MusulmanM yoki +998 90 123 45 67"}),
+    )
+
+
+class PasswordResetCodeForm(SetPasswordForm):
+    """The Telegram code plus the new password (checked by Django's password validators)."""
+
+    code = forms.CharField(
+        label="Telegram'dan kelgan kod", max_length=6, min_length=6,
+        widget=forms.TextInput(attrs={"inputmode": "numeric", "autocomplete": "one-time-code", "placeholder": "123456"}),
+    )
+    field_order = ["code", "new_password1", "new_password2"]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["new_password1"].label = "Yangi parol"
+        self.fields["new_password2"].label = "Yangi parolni takrorlang"
+        for field in self.fields.values():
+            field.widget.attrs.setdefault("class", "form-input")
+
+    def clean_code(self):
+        code = self.cleaned_data["code"].strip()
+        if not code.isdigit():
+            raise ValidationError("Kod 6 ta raqamdan iborat.")
+        return code

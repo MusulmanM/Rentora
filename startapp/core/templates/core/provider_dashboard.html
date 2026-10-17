@@ -10,7 +10,25 @@
     <div class="company-card-text"><b data-no-translate="true">{{ host_profile.display_name }}</b>{% if host_profile.phone_number %}<span data-no-translate="true">☎ {{ host_profile.phone_number }}</span>{% endif %}</div>
     {% if not host_profile.is_complete %}<p class="provider-telegram-note">Kompaniya logotipi va telefon raqamini qo'shing — ular e'lonlaringiz sahifasida ko'rinadi.</p>{% endif %}
     <a class="btn btn-outline btn-small" href="{% url 'provider-company' %}">✎ Kompaniya ma'lumotlari</a>
+    <a class="btn btn-outline btn-small" href="{% url 'provider-payments' %}">💳 To'lov sozlamalari</a>
   </div>
+  <section class="income-panel" aria-labelledby="income-title">
+    <div class="income-head">
+      <div><p class="section-kicker">ANALITIKA</p><h2 id="income-title">Daromad</h2></div>
+      <nav class="income-years" aria-label="Yil">{% for y in income.years %}<a href="?year={{ y }}"{% if y == income.year %} class="active" aria-current="true"{% endif %}>{{ y }}</a>{% endfor %}</nav>
+    </div>
+    <div class="income-kpis">
+      {% if income.month_total is not None %}<div class="income-kpi"><small>Shu oy</small><b>{{ income.month_total|money }} so'm</b></div>{% endif %}
+      <div class="income-kpi"><small>{{ income.year }} yil</small><b>{{ income.year_total|money }} so'm</b>{% if income.year_change is not None %}<span class="income-change {% if income.year_change >= 0 %}up{% else %}down{% endif %}">{% if income.year_change >= 0 %}▲{% else %}▼{% endif %} {{ income.year_change }}% o'tgan yilga nisbatan</span>{% endif %}</div>
+      <div class="income-kpi"><small>Ijaralar soni</small><b>{{ income.year_count }}</b></div>
+      <div class="income-kpi"><small>O'rtacha ijara</small><b>{{ income.average|money }} so'm</b></div>
+    </div>
+    <div class="income-chart" role="img" aria-label="{{ income.year }} yil oylik daromad">
+      {% for m in income.months %}<div class="income-bar{% if m.is_current %} current{% endif %}" title="{{ m.label }}: {{ m.total|money }} so'm, {{ m.count }} ta ijara"><span class="income-bar-value">{% if m.total %}{{ m.total|money }}{% endif %}</span><i data-bar-height="{{ m.height }}"></i><small>{{ m.label }}</small></div>{% endfor %}
+    </div>
+    {% if income.yearly|length > 1 %}<div class="income-yearly">{% for row in income.yearly %}<span><small>{{ row.year }}</small><b>{{ row.total|money }} so'm</b></span>{% endfor %}</div>{% endif %}
+    <p class="income-note">Tasdiqlangan, topshirilgan va qaytarilgan bronlar hamda undirilgan kechikish qarzlari hisobga olinadi (bron boshlangan oy bo'yicha).</p>
+  </section>
   <form method="get" class="dashboard-filters" role="search">
     <input type="search" name="q" value="{{ filters.q }}" placeholder="E'lon, marka yoki mijoz bo'yicha qidirish" aria-label="Qidirish">
     <select name="kind" aria-label="E'lon turi"><option value="">Barcha turlar</option><option value="home"{% if filters.kind == 'home' %} selected{% endif %}>Uylar</option><option value="car"{% if filters.kind == 'car' %} selected{% endif %}>Avtomobillar</option></select>
@@ -28,12 +46,14 @@
       <div class="my-booking-info"><div class="my-booking-topline"><span class="booking-type-label">BRON SO'ROVI</span><span class="booking-status status-{{ booking.status }}">{{ booking.get_status_display }}</span></div>
         <h3>{% localized_title booking.listing %}</h3><p data-no-translate="true">{{ booking.user.get_full_name|default:booking.user.username }}</p>
         <div class="booking-date-row"><span><small>IJARA</small><b>{{ booking.check_in|date:'d.m.Y' }} — {{ booking.check_out|date:'d.m.Y' }}</b></span><span><small>MUDDAT</small><b>{{ booking.days }} kun</b></span><span><small>JAMI</small><b>{{ booking.total_price|money }} so'm</b></span><span><small>TO'LOV</small><b>{{ booking.get_payment_method_display }}</b></span></div>
+        {% if booking.is_overdue %}<p class="overdue-alert">⚠ Muddati {{ booking.late_days }} kun o'tdi, mahsulot qaytarilmagan. Kechikish qarzi: <b>{{ booking.current_debt|money }} so'm</b> (kuniga {{ booking.daily_rate|money }} so'm).</p>{% elif booking.status == 'handed_over' and booking.check_out == today %}<p class="overdue-alert soft">Bugun ijara muddati tugaydi.</p>{% endif %}
+        {% include 'core/partials/installments.html' with booking=booking role='provider' open=True %}
         <small>Bron tugmasi bosilgan: {{ booking.requested_at|date:'d.m.Y H:i' }}</small>
       </div>
       <div class="my-booking-total">
         {% if booking.status == 'pending' %}<form method="post" action="{% url 'provider-booking-action' booking.pk 'confirm' %}">{% csrf_token %}<button class="btn btn-dark" type="submit">Tasdiqlayman</button></form>
         {% elif booking.status == 'confirmed' %}<form method="post" action="{% url 'provider-booking-action' booking.pk 'handover' %}" data-confirm="Mahsulotni mijozga topshirganingizni tasdiqlaysizmi?">{% csrf_token %}<button class="btn btn-dark" type="submit">Mahsulot ijaraga topshirildi</button></form>
-        {% elif booking.status == 'handed_over' %}<strong>Mahsulot mijozda</strong>{% endif %}
+        {% elif booking.status == 'handed_over' %}<form method="post" action="{% url 'provider-booking-action' booking.pk 'return' %}" class="return-form" data-confirm="Mahsulot sizga qaytarilganini tasdiqlaysizmi?">{% csrf_token %}{% with debt=booking.current_debt %}{% if debt %}<label class="checkbox-row debt-check"><input type="checkbox" name="debt_paid" value="1" required> Qarz {{ debt|money }} so'm to'landi</label>{% endif %}{% endwith %}<button class="btn btn-dark" type="submit">Mahsulot qaytarildi</button></form>{% endif %}
         {% if booking.status == 'pending' or booking.status == 'confirmed' %}<form method="post" action="{% url 'provider-booking-action' booking.pk 'reject' %}" data-confirm="Bron so'rovini rad etasizmi?">{% csrf_token %}<button class="btn btn-danger-outline" type="submit">Rad etish</button></form>{% endif %}
         <form method="post" action="{% url 'chat-start-booking' booking.pk %}">{% csrf_token %}<button class="btn btn-outline" type="submit">Mijoz bilan chat</button></form>
       </div>
@@ -45,7 +65,7 @@
   <div class="listing-grid provider-listing-grid">
     {% for listing in listings %}
     <article class="listing-card">
-      <a class="listing-image-wrap" href="{% url 'listing-detail' listing.slug %}"><img class="listing-image" src="{{ listing.primary_image_url|default:'https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=900&q=85' }}" alt="{{ listing.title }}"><span class="listing-kind">{% if listing.pk in rented_listing_ids %}Mijozda{% elif listing.availability_status == 'repair' %}Remont{% elif listing.is_active %}Faol{% else %}Yashirilgan{% endif %}</span></a>
+      <a class="listing-image-wrap" href="{% url 'listing-detail' listing.slug %}"><img class="listing-image" src="{{ listing.card_image_url|default:'https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=900&q=85' }}" alt="{{ listing.title }}"><span class="listing-kind">{% if listing.pk in rented_listing_ids %}Mijozda{% elif listing.availability_status == 'repair' %}Remont{% elif listing.is_active %}Faol{% else %}Yashirilgan{% endif %}</span></a>
       <div class="listing-card-body"><div class="listing-location">{% listing_location listing %}</div><h2 class="provider-listing-title"><a href="{% url 'listing-detail' listing.slug %}">{% localized_title listing %}</a></h2><div class="listing-card-bottom"><strong>{{ listing.price_per_day|money }} so'm / kun</strong><a class="card-arrow" href="{% url 'listing-detail' listing.slug %}" aria-label="E'lonni ko'rish">↗</a></div>
         <form method="post" action="{% url 'provider-listing-availability' listing.pk %}" class="listing-availability-form">{% csrf_token %}<label for="listing-status-{{ listing.pk }}">Ijara holati</label><select id="listing-status-{{ listing.pk }}" name="status"><option value="active"{% if listing.availability_status == 'active' %} selected{% endif %}>Faol</option><option value="repair"{% if listing.availability_status == 'repair' %} selected{% endif %}>Remont</option></select><button class="btn btn-outline btn-small" type="submit">Saqlash</button></form>
         <div class="provider-card-actions"><a class="btn btn-outline btn-small" href="{% url 'provider-edit-listing' listing.pk %}">✎ Tahrirlash</a></div>

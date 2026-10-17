@@ -1,0 +1,9 @@
+{% load static core_tags %}<link rel="canonical" href="{% absolute_url request.path %}">
+  <meta property="og:site_name" content="Rentora">
+  <meta property="og:type" content="{{ seo_type|default:'website' }}">
+  <meta property="og:locale" content="uz_UZ">
+  <meta property="og:title" content="{{ seo_title|default:'Rentora — turar joy va avtomobil ijarasi' }}">
+  <meta property="og:description" content="{{ seo_description|default:"O'zbekistonda uy va avtomobilni oson toping va bron qiling." }}">
+  <meta property="og:url" content="{% absolute_url request.path %}">
+  <meta property="og:image" content="{% if seo_image %}{% absolute_url seo_image %}{% else %}{% static 'core/icon-512.png' as default_image %}{% absolute_url default_image %}{% endif %}">
+  <meta name="twitter:card" content="{% if seo_image %}summary_large_image{% else %}summary{% endif %}">

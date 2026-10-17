@@ -1,0 +1,19 @@
+{% extends 'core/helper/base.html' %}
+{% block helper_title %}Kartalar{% endblock %}
+{% block helper_content %}
+<div class="helper-head"><div><p class="section-kicker">IJARA BERUVCHILAR TO'LOV KARTALARI</p><h1>Kartalar</h1></div></div>
+<p class="helper-muted helper-note">Ijara beruvchi kiritgan kartani tekshiring: karta egasining ismi kompaniya yoki ijara beruvchiga mos kelsin. Tasdiqlangandan keyin mijozlar uning e'lonlari uchun Click / Payme orqali to'lay oladi. Rad etilsa, karta o'chiriladi va ijara beruvchi qayta kiritadi.</p>
+<section class="helper-card helper-list">
+  {% for account, number in pending %}
+  <article class="helper-contact is-unread">
+    <div class="helper-contact-head"><b data-no-translate="true">{{ account.user.host_profile.display_name|default:account.user.username }}</b><span class="helper-muted">{{ account.updated_at|date:'d.m.Y H:i' }}</span></div>
+    <p data-no-translate="true"><b>{{ account.get_card_brand_display|default:"—" }}</b> · <span class="helper-mono">{{ number|slice:":4" }} {{ number|slice:"4:8" }} {{ number|slice:"8:12" }} {{ number|slice:"12:" }}</span></p>
+    <p class="helper-muted"><span>Karta egasi:</span> <span data-no-translate="true">{{ account.card_holder }}</span> · <span>Foydalanuvchi:</span> <span data-no-translate="true">{{ account.user.username }}</span>{% if account.user.host_profile.phone_number %} · <span data-no-translate="true">{{ account.user.host_profile.phone_number }}</span>{% endif %}</p>
+    <div class="helper-actions-row">
+      <form method="post" action="{% url 'helper-card-review' account.pk 'approve' %}">{% csrf_token %}<button class="btn btn-dark btn-small" type="submit">Tasdiqlash</button></form>
+      <form method="post" action="{% url 'helper-card-review' account.pk 'reject' %}" data-confirm="Kartani rad etasizmi? Ijara beruvchi uni qayta kiritadi.">{% csrf_token %}<button class="btn btn-danger-outline btn-small" type="submit">Rad etish</button></form>
+    </div>
+  </article>
+  {% empty %}<p class="helper-muted">Tasdiq kutayotgan karta yo'q.</p>{% endfor %}
+</section>
+{% endblock %}

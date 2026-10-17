@@ -12,6 +12,8 @@ from django.urls import reverse
 from django.utils import timezone
 from PIL import Image, ImageOps
 
+from .bot_i18n import COMMANDS, LANGUAGE_BUTTONS, LANGUAGES, PAYMENT, PLAN, STATUS, label, localized_title, money, t
+
 
 logger = logging.getLogger(__name__)
 
@@ -86,12 +88,41 @@ def _call_multipart(method, fields, file_field, filename, content):
     return _send(method, request)
 
 
-def request_contact(chat_id):
+def _site():
+    return (getattr(settings, "PUBLIC_SITE_URL", "") or "").rstrip("/")
+
+
+def _keyboard(rows):
+    return {"keyboard": [[{"text": text} for text in row] for row in rows], "resize_keyboard": True}
+
+
+def _main_menu(language):
+    return _keyboard([
+        [t("menu_bookings", language), t("menu_site", language)],
+        [t("menu_help", language), t("menu_language", language)],
+    ])
+
+
+def _language_menu():
+    return _keyboard([[LANGUAGE_BUTTONS["uz"], LANGUAGE_BUTTONS["ru"], LANGUAGE_BUTTONS["en"]]])
+
+
+def _reply(chat_id, text, keyboard=None):
+    payload = {"chat_id": chat_id, "text": text, "disable_web_page_preview": True}
+    if keyboard is not None:
+        payload["reply_markup"] = keyboard
+    try:
+        _call("sendMessage", payload)
+    except TelegramError:
+        logger.warning("Telegram bot reply could not be sent.")
+
+
+def request_contact(chat_id, language="uz"):
     return _call("sendMessage", {
         "chat_id": chat_id,
-        "text": "Hi!\n\nRentora'da ro'yxatdan o'tish uchun telefon raqamingizni yuboring.",
+        "text": t("welcome_need_phone", language),
         "reply_markup": {
-            "keyboard": [[{"text": "Telefon raqamni yuborish", "request_contact": True}]],
+            "keyboard": [[{"text": t("share_phone", language), "request_contact": True}]],
             "resize_keyboard": True,
             "one_time_keyboard": True,
         },
@@ -102,13 +133,57 @@ def send_message(chat_id, text):
     return _call("sendMessage", {"chat_id": chat_id, "text": text})
 
 
+def send_localized(chat_id, key, **values):
+    """Send a bot text in the language this chat chose."""
+    from .models import chat_language
+
+    return send_message(chat_id, t(key, chat_language(chat_id), **values))
+
+
+def set_bot_commands():
+    """The "/" menu of the bot in every language (Telegram picks it by the user's app language)."""
+    for language, commands in COMMANDS.items():
+        payload = {"commands": [{"command": name, "description": text} for name, text in commands]}
+        if language != "uz":
+            payload["language_code"] = language
+        _call("setMyCommands", payload)
+
+
+def _menu_matches(text, key):
+    return text in {t(key, language) for language in LANGUAGES}
+
+
+def _bookings_text(chat_id, language):
+    from .models import Booking, UserProfile
+
+    profile = UserProfile.objects.filter(telegram_account__chat_id=str(chat_id)).select_related("user").first()
+    if profile is None:
+        return t("bookings_not_linked", language, site=_site())
+    bookings = list(Booking.objects.filter(user=profile.user).select_related("listing").order_by("-created_at")[:5])
+    if not bookings:
+        return t("bookings_none", language)
+    lines = [t("bookings_header", language), ""]
+    for booking in bookings:
+        lines.append(f"#{booking.pk} {localized_title(booking.listing, language)}")
+        lines.append(
+            f"{booking.check_in:%d.%m.%Y} — {booking.check_out:%d.%m.%Y} · {label(STATUS, booking.status, language)}"
+        )
+        lines.append(t("total", language, total=money(booking.total_price)))
+        if booking.is_overdue:
+            lines.append(t("event_overdue_customer", language, days=booking.late_days(),
+                           rate=money(booking.daily_rate), debt=money(booking.current_debt())).split("\n")[0])
+        lines.append("")
+    lines.append(t("bookings_footer", language, site=_site()))
+    return "\n".join(lines)
+
+
 def handle_telegram_update(update):
-    """Process one Telegram update (from the webhook or long polling): /start and contact sharing."""
+    """One Telegram update (webhook or long polling): language, phone linking, menu and bookings."""
     from django.core.exceptions import ValidationError
     from django.db import IntegrityError
 
     from .forms import normalize_phone_number
-    from .models import TelegramAccount
+    from .models import TelegramAccount, TelegramChatLanguage, chat_language
 
     message = update.get("message")
     if not isinstance(message, dict):
@@ -119,6 +194,9 @@ def handle_telegram_update(update):
     chat_id = chat.get("id")
     if not telegram_user_id or not chat_id or chat.get("type") != "private" or str(chat_id) != str(telegram_user_id):
         return
+    chat_id = str(chat_id)
+    language = chat_language(chat_id)
+    linked = TelegramAccount.objects.filter(chat_id=chat_id).exists()
 
     contact = message.get("contact")
     if isinstance(contact, dict):
@@ -127,10 +205,7 @@ def handle_telegram_update(update):
         try:
             phone_number = normalize_phone_number(contact.get("phone_number", ""))
         except ValidationError:
-            try:
-                send_message(str(chat_id), "Faqat O'zbekiston telefon raqami bilan ro'yxatdan o'tish mumkin.")
-            except TelegramError:
-                logger.warning("Telegram could not send a contact validation message.")
+            _reply(chat_id, t("only_uz_phone", language))
             return
         try:
             telegram_username = str(sender.get("username", "")).strip().lstrip("@")[:64]
@@ -138,33 +213,53 @@ def handle_telegram_update(update):
                 phone_number=phone_number,
                 defaults={
                     "telegram_user_id": str(telegram_user_id),
-                    "chat_id": str(chat_id),
+                    "chat_id": chat_id,
                     "telegram_username": telegram_username,
                 },
             )
         except IntegrityError:
             account = TelegramAccount.objects.filter(phone_number=phone_number).first()
-        if account and (
-            account.telegram_user_id == str(telegram_user_id)
-            and account.chat_id == str(chat_id)
-        ):
+        if account and account.telegram_user_id == str(telegram_user_id) and account.chat_id == chat_id:
             if telegram_username and account.telegram_username != telegram_username:
                 account.telegram_username = telegram_username
                 account.save(update_fields=["telegram_username"])
-            response_text = "Telefon raqamingiz bog'landi. Endi Rentora saytida ro'yxatdan o'tishingiz mumkin."
+            _reply(chat_id, t("phone_linked", language, site=_site()), _main_menu(language))
         else:
-            response_text = "Bu Telegram hisobi yoki telefon raqami boshqa akkauntga bog'langan."
-        try:
-            send_message(str(chat_id), response_text)
-        except TelegramError:
-            logger.warning("Telegram could not send the contact-link confirmation.")
+            _reply(chat_id, t("phone_taken", language))
         return
 
-    if str(message.get("text", "")).split(maxsplit=1)[0:1] == ["/start"]:
+    text = str(message.get("text", "")).strip()
+    command = text.split(maxsplit=1)[0].split("@")[0].lower() if text.startswith("/") else ""
+
+    chosen = next((code for code, button in LANGUAGE_BUTTONS.items() if text == button), None)
+    if chosen:
+        TelegramChatLanguage.objects.update_or_create(chat_id=chat_id, defaults={"language": chosen})
+        if linked:
+            _reply(chat_id, t("language_set", chosen), _main_menu(chosen))
+        else:
+            _reply(chat_id, t("language_set", chosen))
+            try:
+                request_contact(chat_id, chosen)
+            except TelegramError:
+                logger.warning("Telegram could not send the contact request prompt.")
+        return
+    if command in ("/start", "/language") or _menu_matches(text, "menu_language"):
+        _reply(chat_id, "\n".join(t("choose_language", code) for code in LANGUAGES), _language_menu())
+        return
+    if not linked:
         try:
-            request_contact(str(chat_id))
+            request_contact(chat_id, language)
         except TelegramError:
             logger.warning("Telegram could not send the contact request prompt.")
+        return
+    if command == "/bookings" or _menu_matches(text, "menu_bookings"):
+        _reply(chat_id, _bookings_text(chat_id, language), _main_menu(language))
+    elif command == "/help" or _menu_matches(text, "menu_help"):
+        _reply(chat_id, t("help", language, site=_site()), _main_menu(language))
+    elif _menu_matches(text, "menu_site"):
+        _reply(chat_id, t("open_site", language, site=_site()), _main_menu(language))
+    else:
+        _reply(chat_id, t("unknown", language), _main_menu(language))
 
 
 def _telegram_jpeg(field_file):
@@ -203,41 +298,43 @@ def _send_listing_photo(chat_id, listing, caption, site_url):
 
 
 def send_booking_notice(chat_id, booking, event, audience, base_url=""):
+    from .models import chat_language
+
+    language = chat_language(chat_id)
     listing = booking.listing
     site_url = (getattr(settings, "PUBLIC_SITE_URL", "") or base_url).rstrip("/")
     listing_path = reverse("listing-detail", args=[listing.slug])
     listing_url = urljoin(f"{site_url}/", listing_path.lstrip("/")) if site_url else listing_path
     clicked_at = timezone.localtime(booking.requested_at).strftime("%d.%m.%Y %H:%M")
     customer = booking.user.get_full_name() or booking.user.get_username()
-    common = (
-        f"{listing.title}\n"
-        f"Narxi: {listing.price_per_day:,.0f} so'm / kun\n"
-        f"Muddati: {booking.days} kun ({booking.check_in:%d.%m.%Y} — {booking.check_out:%d.%m.%Y})\n"
-        f"Jami: {booking.total_price:,.0f} so'm\n"
-        f"To'lov: {booking.get_payment_method_display()}\n"
-        f"Bron so'rovi: {clicked_at}\n"
-        f"{listing_url}"
-    )
+    common = "\n".join([
+        localized_title(listing, language),
+        t("price", language, price=money(listing.price_per_day)),
+        t("period", language, days=booking.days, start=f"{booking.check_in:%d.%m.%Y}", end=f"{booking.check_out:%d.%m.%Y}"),
+        *([t("months_line", language, months=booking.months, price=money(listing.price_per_month or 0))] if booking.is_monthly else []),
+        t("total", language, total=money(booking.total_price)),
+        t("payment", language, method=label(PAYMENT, booking.payment_method, language)),
+        *([t("plan_line", language, plan=label(PLAN, booking.payment_plan, language),
+             count=booking.installments.count(), first=money(booking.installments.first().amount))]
+          if booking.has_installments and booking.installments.exists() else []),
+        t("requested_at", language, time=clicked_at),
+        listing_url,
+    ])
     if audience == "provider":
-        common = f"Mijoz: {customer}\n{common}"
-    if event == "requested" and audience == "provider":
-        text = f"Yangi bron so'rovi.\n\n{common}"
-    elif event == "requested":
-        text = f"Bron so'rovingiz ijaraga beruvchiga yuborildi.\n\n{common}"
-    elif event == "rejected" and audience == "provider":
-        text = f"Bron so'rovini rad etdingiz.\n\n{common}"
-    elif event == "rejected":
-        text = f"Ijaraga beruvchi bron so'rovingizni rad etdi.\n\n{common}"
-    elif event == "cancelled":
-        text = f"Bron bekor qilindi.\n\n{common}"
-    elif event == "confirmed" and audience == "provider":
-        text = f"Bronni tasdiqladingiz.\n\n{common}"
-    elif event == "confirmed":
-        text = f"Bron tasdiqlandi.\n\n{common}"
-    elif audience == "provider":
-        text = f"Mahsulot mijozga ijaraga topshirildi.\n\n{common}"
+        common = f"{t('customer', language)}: {customer}\n{common}"
+    side = "provider" if audience == "provider" else "customer"
+    values = {
+        "rate": money(booking.daily_rate), "days": booking.late_days(), "debt": money(booking.current_debt()),
+    }
+    if event in ("cancelled", "returned"):
+        headline = t(f"event_{event}", language)
+        if event == "returned" and booking.debt_amount:
+            headline += "\n" + t("returned_debt", language, debt=money(booking.debt_amount), days=booking.overdue_days)
+    elif event in ("requested", "rejected", "confirmed", "handed_over", "ending", "overdue"):
+        headline = t(f"event_{event}_{side}", language, **values)
     else:
-        text = f"Bugun mahsulotni olib ketishingiz mumkin.\n\n{common}"
+        headline = t(f"event_handed_over_{side}", language)
+    text = f"{headline}\n\n{common}"
 
     # A failed photo upload must never swallow the notice itself: fall back to plain text.
     try:
@@ -246,6 +343,48 @@ def send_booking_notice(chat_id, booking, event, audience, base_url=""):
     except TelegramError:
         logger.warning("Telegram photo notice failed for listing %s; sending text instead.", listing.pk)
     _call("sendMessage", {"chat_id": chat_id, "text": text})
+
+
+def _chat_of(user_id):
+    from .models import UserProfile
+
+    profile = UserProfile.objects.filter(user_id=user_id, telegram_account__isnull=False).select_related("telegram_account").first()
+    return profile.telegram_account.chat_id if profile else None
+
+
+def notify_installment(installment_id, event, base_url=""):
+    """Instalment news for both sides: "paid", "due" (tomorrow / today) or "overdue"."""
+    from .installments import paid_summary
+    from .models import Installment, chat_language
+
+    installment = Installment.objects.select_related("booking", "booking__listing", "booking__user").filter(pk=installment_id).first()
+    if installment is None:
+        return
+    booking = installment.booking
+    site = (getattr(settings, "PUBLIC_SITE_URL", "") or base_url).rstrip("/")
+    summary = paid_summary(booking)
+    customer = booking.user.get_full_name() or booking.user.get_username()
+    late = max((timezone.localdate() - installment.due_date).days, 0)
+    for user_id, side in ((booking.user_id, "customer"), (booking.listing.owner_id, "provider")):
+        chat_id = _chat_of(user_id) if user_id else None
+        if not chat_id:
+            continue
+        language = chat_language(chat_id)
+        text = t(
+            f"installment_{event}_{side}", language,
+            number=installment.number, amount=money(installment.amount), date=f"{installment.due_date:%d.%m.%Y}",
+            days=late, customer=customer, title=localized_title(booking.listing, language),
+            left=money(summary["left_total"]), left_count=summary["count"] - summary["paid_count"],
+            url=f"{site}{reverse('my-bookings')}",
+        )
+        try:
+            _call("sendMessage", {"chat_id": chat_id, "text": text, "disable_web_page_preview": True})
+        except TelegramError:
+            logger.warning("Instalment notice %s could not reach user %s.", event, user_id)
+
+
+def notify_installment_paid(installment_id, base_url=""):
+    notify_installment(installment_id, "paid", base_url)
 
 
 def notify_booking_parties(booking_id, event, base_url=""):

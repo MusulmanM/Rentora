@@ -1,4 +1,4 @@
-from django.db.models import QuerySet
+from django.db.models import Q, QuerySet
 from django.utils import timezone
 
 from .models import Booking, RentalListing
@@ -12,9 +12,10 @@ ACTIVE_BOOKING_STATUSES = (
 
 
 def active_bookings():
+    # An item still with the customer keeps its listing busy even after check_out (late return).
     return Booking.objects.filter(
-        status__in=ACTIVE_BOOKING_STATUSES,
-        check_out__gt=timezone.localdate(),
+        Q(status__in=ACTIVE_BOOKING_STATUSES, check_out__gt=timezone.localdate())
+        | Q(status=Booking.Status.HANDED_OVER)
     )
 
 

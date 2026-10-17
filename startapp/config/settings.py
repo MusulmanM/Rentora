@@ -1,5 +1,4 @@
 """Settings for the Rentora project."""
-import base64
 import os
 import sys
 from pathlib import Path
@@ -24,17 +23,23 @@ ALLOWED_HOSTS = [host.strip() for host in os.environ.get(
 CSRF_TRUSTED_ORIGINS = [origin.strip() for origin in os.environ.get(
     "CSRF_TRUSTED_ORIGINS", ""
 ).split(",") if origin.strip()]
+# Online payments: Rentora's single Click / Payme merchant. Providers only add a bank card and are paid
+# out after the hand-over, minus RENTORA_COMMISSION_PERCENT (core/payouts.py).
 CLICK_SERVICE_ID = os.environ.get("CLICK_SERVICE_ID", "")
 CLICK_MERCHANT_ID = os.environ.get("CLICK_MERCHANT_ID", "")
 CLICK_SECRET_KEY = os.environ.get("CLICK_SECRET_KEY", "")
+# Click Merchant API (refund / status); optional, without it refunds are done by an admin.
+CLICK_MERCHANT_USER_ID = os.environ.get("CLICK_MERCHANT_USER_ID", "")
 CLICK_CHECKOUT_BASE_URL = os.environ.get("CLICK_CHECKOUT_BASE_URL", "https://my.click.uz/services/pay")
 PAYME_MERCHANT_ID = os.environ.get("PAYME_MERCHANT_ID", "")
 PAYME_MERCHANT_KEY = os.environ.get("PAYME_MERCHANT_KEY", "")
-PAYME_MERCHANT_AUTHORIZATION = (
-    "Basic " + base64.b64encode(f"Paycom:{PAYME_MERCHANT_KEY}".encode()).decode()
-    if PAYME_MERCHANT_KEY else ""
-)
+# Payme test checkout: https://checkout.test.paycom.uz
 PAYME_CHECKOUT_BASE_URL = os.environ.get("PAYME_CHECKOUT_BASE_URL", "https://checkout.paycom.uz")
+RENTORA_COMMISSION_PERCENT = os.environ.get("RENTORA_COMMISSION_PERCENT", "5")
+# Encrypts providers' card numbers in the database. Set it once and never change it.
+PAYMENT_ENCRYPTION_KEY = os.environ.get("PAYMENT_ENCRYPTION_KEY", "")
+# Payme only waits 12 hours for a created transaction to be performed.
+PAYME_TRANSACTION_TIMEOUT_MS = 12 * 60 * 60 * 1000
 # AI: Google Gemini through its OpenAI-compatible chat completions endpoint.
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite")
@@ -54,6 +59,11 @@ SUPPORT_AI_ENABLED = os.environ.get("SUPPORT_AI_ENABLED", "1").strip().lower() i
 SUPPORT_AI_DELAY_SECONDS = int(os.environ.get("SUPPORT_AI_DELAY_SECONDS", "120"))
 # Django admin lives here; change it to something non-obvious in production.
 ADMIN_URL = os.environ.get("ADMIN_URL", "admin/").strip("/") + "/"
+# Addresses allowed to tell us the visitor's IP in CF-Connecting-IP (Cloudflare Tunnel). Loopback by
+# default; in Docker the tunnel arrives through the bridge gateway, so add the Docker range there.
+CF_TRUSTED_PROXIES = [
+    item.strip() for item in os.environ.get("CF_TRUSTED_PROXIES", "127.0.0.1/32,::1/128").split(",") if item.strip()
+]
 # Set when a trusted reverse proxy (Caddy/nginx) in front of the app sets X-Real-IP.
 TRUST_X_REAL_IP = os.environ.get("TRUST_X_REAL_IP", "").strip().lower() in {"1", "true", "yes"}
 
@@ -64,6 +74,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "django.contrib.sitemaps",
     "django.contrib.humanize",
     "rest_framework",
     "core",
@@ -159,8 +170,9 @@ CACHES = {
 CONTENT_SECURITY_POLICY = "; ".join([
     "default-src 'self'",
     "script-src 'self'",
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-    "font-src 'self' https://fonts.gstatic.com",
+    # No 'unsafe-inline': pages carry no inline styles (dynamic sizes are set from JS via the CSSOM).
+    "style-src 'self'",
+    "font-src 'self'",
     "img-src 'self' data: blob: https:",
     "media-src 'self' blob:",
     "connect-src 'self'",
@@ -168,6 +180,7 @@ CONTENT_SECURITY_POLICY = "; ".join([
     "form-action 'self' https://my.click.uz https://checkout.paycom.uz https://test.paycom.uz",
     "base-uri 'self'",
     "object-src 'none'",
+    "upgrade-insecure-requests",
 ])
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = "DENY"
@@ -186,6 +199,13 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
     ],
+    "DEFAULT_THROTTLE_CLASSES": [
+        "rest_framework.throttling.AnonRateThrottle",
+        "rest_framework.throttling.UserRateThrottle",
+    ],
+    "DEFAULT_THROTTLE_RATES": {"anon": "120/min", "user": "300/min"},
+    # Cloudflare appends the visitor's address to X-Forwarded-For: use that entry, not a client-sent one.
+    "NUM_PROXIES": 1,
 }
 
 LOGGING = {
@@ -201,11 +221,14 @@ if not DEBUG:
         raise RuntimeError("Set DJANGO_SECRET_KEY before running with DJANGO_DEBUG=0.")
     # Only mark cookies Secure when the site is actually served over HTTPS.
     SESSION_COOKIE_SECURE = CSRF_COOKIE_SECURE = PUBLIC_SITE_URL.startswith("https://")
-    CSRF_COOKIE_HTTPONLY = False  # The same-origin frontend reads the token for AJAX requests.
+    # The frontend takes the CSRF token from the page (form field), never from the cookie.
+    CSRF_COOKIE_HTTPONLY = True
     if os.environ.get("DJANGO_BEHIND_HTTPS_PROXY", "").strip().lower() in {"1", "true", "yes"}:
         SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
     if PUBLIC_SITE_URL.startswith("https://"):
         SECURE_HSTS_SECONDS = int(os.environ.get("SECURE_HSTS_SECONDS", "31536000"))
+        SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+        SECURE_HSTS_PRELOAD = True
         SECURE_SSL_REDIRECT = os.environ.get("SECURE_SSL_REDIRECT", "1").strip().lower() in {"1", "true", "yes"}
         # The health check is called over plain HTTP inside the container.
         SECURE_REDIRECT_EXEMPT = [r"^health/$"]

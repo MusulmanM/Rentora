@@ -1,11 +1,17 @@
 from django.contrib.auth import views as auth_views
 from django.urls import path
 from . import helper_views, views
+from .guest_support import guest_support, guest_support_messages
+from .password_reset import password_reset_request, password_reset_verify
 from .payments import click_callback, payme_callback
 
 urlpatterns = [
     path("", views.home, name="home"),
     path("accounts/login/", views.StartAppLoginView.as_view(), name="login"),
+    path("accounts/password/reset/", password_reset_request, name="password-reset"),
+    path("accounts/password/reset/code/", password_reset_verify, name="password-reset-verify"),
+    path("help/chat/", guest_support, name="guest-support"),
+    path("help/chat/messages/", guest_support_messages, name="guest-support-messages"),
     path("accounts/logout/", auth_views.LogoutView.as_view(), name="logout"),
     path("accounts/register/", views.register, name="register"),
     path("accounts/register/verify/", views.verify_registration, name="verify-registration"),
@@ -19,6 +25,7 @@ urlpatterns = [
     path("contact/", views.contact_admin, name="contact-admin"),
     path("provider/register/", views.provider_onboarding, name="provider-onboarding"),
     path("provider/company/", views.provider_company, name="provider-company"),
+    path("provider/payments/", views.provider_payments, name="provider-payments"),
     path("provider/", views.provider_dashboard, name="provider-dashboard"),
     path("provider/listings/<int:listing_id>/availability/", views.update_listing_availability, name="provider-listing-availability"),
     path("provider/bookings/<int:booking_id>/<str:action>/", views.update_provider_booking, name="provider-booking-action"),
@@ -37,12 +44,16 @@ urlpatterns = [
     path("my-bookings/", views.my_bookings, name="my-bookings"),
     path("my-bookings/<int:booking_id>/cancel/", views.cancel_booking, name="cancel-booking"),
     path("my-bookings/orders/<int:order_id>/pay/", views.pay_booking_order, name="pay-booking-order"),
+    path("my-bookings/installments/<int:installment_id>/pay/", views.pay_installment, name="pay-installment"),
+    path("provider/installments/<int:installment_id>/paid/", views.provider_installment_paid, name="provider-installment-paid"),
     path("my-bookings/orders/<int:order_id>/cancel/", views.cancel_booking_order, name="cancel-booking-order"),
     path("payments/click/callback/", click_callback, name="click-payment-callback"),
     path("payments/payme/callback/", payme_callback, name="payme-payment-callback"),
     path("health/", views.health, name="health"),
     path("helper/", helper_views.dashboard, name="helper-dashboard"),
     path("helper/support/", helper_views.support_list, name="helper-support"),
+    path("helper/cards/", helper_views.cards, name="helper-cards"),
+    path("helper/cards/<int:account_id>/<str:action>/", helper_views.card_review, name="helper-card-review"),
     path("helper/support/<int:conversation_id>/", helper_views.support_thread, name="helper-support-thread"),
     path("helper/chats/", helper_views.chats_list, name="helper-chats"),
     path("helper/chats/<int:conversation_id>/", helper_views.chat_view, name="helper-chat-view"),

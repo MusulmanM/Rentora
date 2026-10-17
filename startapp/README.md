@@ -14,7 +14,7 @@ Interfeys o'zbek (`UZ`), rus (`RU`) va ingliz (`EN`) tillarida mavjud. Yuqori qi
 - Viloyat va shahar/tuman bo'yicha O'zbekistonning barcha hududlarini qidirish; tanlangan viloyat shahar/tuman ro'yxatini avtomatik cheklaydi.
 - Profil ichidan ijara beruvchi sifatida alohida yoqilish va shu hisob bilan e'lon joylash.
 - Saytdagi admin bilan bog'lanish formasi; yuborilgan xabarlar Django admin panelida saqlanadi.
-- Naqd bronni darhol saqlash; Click/karta yoki Payme tanlanganda mijozni buyurtmadan so'ng darhol onlayn to'lovga yo'naltirish.
+- Naqd bronni darhol saqlash; Click yoki Payme tanlanganda mijozni ijara beruvchining o'z merchant hisobiga to'lovga yo'naltirish.
 - Onlayn to'lov tasdiqlanmaguncha bron so'rovi yaratilmaydi; muvaffaqiyatli callback provayder tasdig'ini kutayotgan bronni yaratadi va sanalarni band qiladi.
 - Bron va buyurtmalarni bekor qilish; kutilayotgan buyurtmalar sanalarni boshqa mijozlardan vaqtincha band qiladi.
 - Bron holatlari: kutilmoqda, tasdiqlangan, mijozga topshirilgan yoki bekor qilingan.
@@ -122,17 +122,29 @@ Admin yangi e'lonida yoki ijara beruvchi kabinetida 10 tagacha haqiqiy rasm fayl
 
 ### Onlayn to'lov
 
-Click merchant kabinetida callback URL sifatida `https://<sayt-domeni>/payments/click/callback/` manzilini sozlang. Payme Business Merchant API URL'i `https://<sayt-domeni>/payments/payme/callback/` bo'ladi. Merchant ma'lumotlarini `.env` fayliga yoki hosting environment'iga kiriting; secret'larni repoga qo'shmang:
+To'lov turlari: **Naqd**, **Click**, **Payme**. Rentora Click va Payme bilan **bitta** shartnoma tuzadi; ijara beruvchi faqat **karta raqamini** (Uzcard/Humo) kiritadi.
 
-```dotenv
-CLICK_SERVICE_ID=
-CLICK_MERCHANT_ID=
-CLICK_SECRET_KEY=
-PAYME_MERCHANT_ID=
-PAYME_MERCHANT_KEY=
-```
+1. Mijoz Click yoki Payme orqali Rentora'ning merchant hisobiga to'laydi. Bron yaratiladi, ijara beruvchining ulushi **ushlab turiladi**.
+2. Ijara beruvchi "Mahsulot ijaraga topshirildi" tugmasini bosgach, ulush (summa − `RENTORA_COMMISSION_PERCENT`) **o'tkazishga tayyor** bo'ladi.
+3. Bosh admin Django admin'dagi **To'lov o'tkazmalari** bo'limida to'liq karta raqamini ko'radi, pulni o'tkazadi va "o'tkazildi" deb belgilaydi. To'lov provayderining kartaga payout API'si ulanganda shu qadam avtomatlashtiriladi (`core/payouts.py`).
+4. Topshirishdan oldin bron bekor qilinsa (mijoz, ijara beruvchi yoki admin), pul **qaytarishga** o'tadi: Click'da `CLICK_MERCHANT_USER_ID` bo'lsa Merchant API (reversal) orqali avtomatik, Payme'da kabinetdan bekor qilinadi (Payme `CancelTransaction` callback'i qaytarishni yopadi).
 
-Buyurtma yuborilgach mijoz darhol tanlangan provayderning to'lov sahifasiga yo'naltiriladi; admin yoki mezbon tasdig'i talab qilinmaydi. Django faqat provayder imzosi va muvaffaqiyatli callback tekshirilgach `Booking` yozuvini yaratadi. Karta va Click tanlovlari Click checkout'iga, Payme tanlovi Payme Business checkout'iga yo'naltiriladi. Test/sandbox uchun provider bergan test checkout URL va merchant credential'larini `CLICK_CHECKOUT_BASE_URL` hamda `PAYME_CHECKOUT_BASE_URL` orqali belgilang. Callback'lar ommaviy internetdan HTTPS orqali ochiq bo'lishi kerak.
+Ijara beruvchi kartasini **Ijara beruvchi paneli → To'lov sozlamalari** (`/provider/payments/`) sahifasida kiritadi (Luhn tekshiruvi, parol bilan tasdiqlash, ofertaga rozilik). Karta bosh admin tasdiqlagandan keyingina ishlaydi; tasdiqlangan kartasi bo'lmagan ijara beruvchining e'lonlarida faqat naqd to'lov chiqadi.
+
+Xavfsizlik:
+
+- Karta raqami bazada shifrlangan (Fernet) holda saqlanadi, hamma joyda faqat oxirgi 4 raqam ko'rinadi; to'liq raqam faqat bosh adminga, o'tkazish kerak bo'lgan payout sahifasida ko'rsatiladi. Kalit `PAYMENT_ENCRYPTION_KEY` (yo'q bo'lsa `DJANGO_SECRET_KEY`) — bir marta o'rnating va o'zgartirmang.
+- Karta o'zgarsa bosh admin tasdig'i bekor bo'ladi (o'g'irlangan akkaunt pulni boshqa kartaga burib yubora olmaydi).
+- Click MD5 imzosi (`merchant_prepare_id` bilan), Payme Basic auth constant-time tekshiriladi; summa har doim bazadan olinadi; takroriy callback ikki marta to'lov qilmaydi; Payme 12 soatlik muddati va bekor qilish sababi (`reason`) qo'llab-quvvatlanadi.
+- Cloudflare tunneli orqali kelgan so'rovlarda haqiqiy IP `CF-Connecting-IP` dan olinadi (faqat localhost ulanishlarida), shuning uchun login va so'rovlar cheklovi har bir foydalanuvchiga alohida ishlaydi.
+
+### Ijara muddati va kechikish
+
+`python manage.py send_rental_reminders` (har soatda; Docker'da `reminders` xizmati) ijara tugash kuni ijarachi va ijara beruvchiga Telegram xabar yuboradi. Mahsulot qaytarilmasa, har kuni ogohlantirish va qarz summasi yuboriladi: **har bir kechikkan kun uchun bir kunlik ijara narxi**. Ijara beruvchi "Mahsulot qaytarildi" tugmasini bosganda qarz bo'lsa, "Qarz to'landi" belgisi majburiy. Qaytarilmagan mahsulotni boshqa mijoz bron qila olmaydi.
+
+### Admin bilan yozishish (akkauntsiz)
+
+Login va ro'yxatdan o'tish sahifalarida "Admin bilan yozishish" tugmasi bor (`/help/chat/`): ro'yxatdan o'ta olmagan, bloklangan yoki parolini unutgan odam ism va xabar yozadi; chat helper-paneldagi "Admin xabarlari"da **Mehmon** belgisi bilan chiqadi, AI yordamchi ro'yxatdan o'tish bo'yicha yo'l-yo'riq beradi va murakkab holatni adminga o'tkazadi. Bloklangan foydalanuvchi to'g'ri parolni kiritganda "Akkauntingiz bloklangan" xabari va shu chatga havola ko'radi.
 
 Integratsiya protokollari: [Click hujjatlari](https://docs.click.uz/) va [Payme Business Merchant API](https://developer.help.paycom.uz/).
 

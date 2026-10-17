@@ -19,9 +19,11 @@ from .admin_ai import AdminAssistantError, ask_admin_assistant
 from .chat import mark_read, other_side_last_read, serialize_message
 from .forms import ChatMessageForm, HelperUserCreateForm
 from .models import (
+    ProviderPaymentAccount,
     Booking, BookingOrder, ChatMessage, ContactMessage, Conversation, HostProfile, RentalListing,
 )
 from .security import rate_limited
+from .payouts import notify_card_result, pending_cards, refund_for_cancelled
 from .telegram import notify_booking_parties
 
 User = get_user_model()
@@ -34,7 +36,11 @@ def staff_required(view):
         if not request.user.is_authenticated:
             return redirect_to_login(request.get_full_path())
         if not (request.user.is_active and request.user.is_staff):
-            raise Http404
+            # E.g. admin rights were just taken away while the panel was open.
+            if request.headers.get("Accept", "").startswith("application/json") or request.method == "POST" and request.headers.get("X-Requested-With"):
+                return JsonResponse({"detail": "Sizda admin huquqi yo'q."}, status=403)
+            messages.info(request, "Sizda endi admin huquqi yo'q.")
+            return redirect("home")
         return view(request, *args, **kwargs)
 
     return wrapped
@@ -189,7 +195,7 @@ def chat_view(request, conversation_id):
 
 @staff_required
 def bookings(request):
-    bookings_qs = Booking.objects.select_related("listing", "user", "listing__owner").order_by("-created_at")
+    bookings_qs = Booking.objects.select_related("listing", "user", "listing__owner").prefetch_related("installments").order_by("-created_at")
     filters = {key: request.GET.get(key, "").strip()[:100] for key in ("q", "status", "kind", "payment", "date_from", "date_to")}
     if filters["q"]:
         query = filters["q"]
@@ -231,14 +237,49 @@ def booking_cancel(request, booking_id):
             return redirect("helper-bookings")
         booking.status = Booking.Status.CANCELLED
         booking.save(update_fields=["status", "updated_at"])
+        transaction.on_commit(lambda: refund_for_cancelled(booking))
         transaction.on_commit(lambda: notify_booking_parties(booking.pk, "cancelled"))
     messages.success(request, f"#{booking.pk} bron bekor qilindi.")
     return redirect(request.POST.get("next") if str(request.POST.get("next", "")).startswith("/helper/") else "helper-bookings")
 
 
+@superuser_required
+def cards(request):
+    """Payout cards waiting for the head admin, with the full number to check against the holder."""
+    return render(request, "core/helper/cards.html", {
+        "pending": [(account, account.card_number) for account in pending_cards()],
+        "section": "cards",
+    })
+
+
+@superuser_required
+@require_POST
+def card_review(request, account_id, action):
+    if action not in ("approve", "reject"):
+        raise Http404
+    account = get_object_or_404(ProviderPaymentAccount, pk=account_id)
+    if action == "approve":
+        if not (account.has_card and account.offer_accepted_at):
+            messages.error(request, "Bu kartani tasdiqlab bo'lmaydi: karta yoki oferta roziligi yo'q.")
+            return redirect("helper-cards")
+        account.approved = True
+        account.save(update_fields=["approved", "updated_at"])
+        messages.success(request, f"{account.masked_card} karta tasdiqlandi.")
+    else:
+        masked = account.masked_card
+        account.approved = False
+        account.card_number_encrypted = account.card_last4 = account.card_brand = ""
+        account.save(update_fields=["approved", "card_number_encrypted", "card_last4", "card_brand", "updated_at"])
+        account.card_last4 = masked[-4:]  # for the message below only
+        messages.info(request, f"{masked} karta rad etildi. Ijara beruvchi kartani qayta kiritadi.")
+    notify_card_result(account, action == "approve")
+    return redirect("helper-cards")
+
+
 @staff_required
 def users(request):
-    users_qs = User.objects.select_related("account", "profile", "host_profile").annotate(
+    # Guests (visitors who wrote from the login page) are not accounts; they live in the support chats.
+    users_qs = User.objects.exclude(account__is_guest=True).select_related("account", "profile", "host_profile").annotate(
         booking_total=Count("bookings", distinct=True), listing_total=Count("owned_listings", distinct=True),
     ).order_by("-date_joined")
     query = request.GET.get("q", "").strip()[:100]
@@ -397,6 +438,7 @@ def unread_counts(request):
     return JsonResponse({
         "support": support.filter(unread_count__gt=0).count(),
         "contacts": ContactMessage.objects.filter(is_read=False).count(),
+        "cards": pending_cards().count() if request.user.is_superuser else 0,
         "latest_support_message": ChatMessage.objects.filter(conversation__kind=Conversation.Kind.SUPPORT).aggregate(
             latest=Max("id"),
         )["latest"] or 0,

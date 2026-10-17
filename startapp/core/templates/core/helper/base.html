@@ -2,7 +2,7 @@
 {% load static core_tags %}
 {% block title %}{% block helper_title %}Helper-admin{% endblock %} — Rentora{% endblock %}
 {% block body_class %}helper-body{% endblock %}
-{% block extra_head %}<link rel="stylesheet" href="{% static 'core/chat.css' %}?v=20261014-tg1"><link rel="stylesheet" href="{% static 'core/helper.css' %}?v=20261014-v2">{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'core/chat.css' %}?v=20261014-tg1"><link rel="stylesheet" href="{% static 'core/helper.css' %}?v=20261016-v2">{% endblock %}
 {% block ai_widget %}{% endblock %}
 {% block content %}
 <div class="helper-shell" data-helper-unread="{% url 'helper-unread' %}">
@@ -17,6 +17,7 @@
       <a href="{% url 'helper-users' %}"{% if section == 'users' %} class="is-active" aria-current="page"{% endif %}><span aria-hidden="true">♙</span> Foydalanuvchilar</a>
       <a href="{% url 'helper-products' %}"{% if section == 'products' %} class="is-active" aria-current="page"{% endif %}><span aria-hidden="true">⌂</span> E'lonlar</a>
       <a href="{% url 'helper-contacts' %}"{% if section == 'contacts' %} class="is-active" aria-current="page"{% endif %}><span aria-hidden="true">✎</span> Forma xabarlari <b class="helper-count" data-count="contacts" hidden></b></a>
+      {% if request.user.is_superuser %}<a href="{% url 'helper-cards' %}"{% if section == 'cards' %} class="is-active" aria-current="page"{% endif %}><span aria-hidden="true">💳</span> Kartalar <b class="helper-count" data-count="cards" hidden></b></a>{% endif %}
     </nav>
     <div class="helper-sidebar-foot">
       {% include 'core/language_switcher.html' %}
